@@ -1,0 +1,427 @@
+---
+title: "Visualize variable CpGs in clocks"
+output: html_notebook
+---
+
+
+# Visualize variable CpGs in clocks:
+```{r}
+readRDS("df_stats_norm.Rds")
+readRDS("df_stats_unnorm.Rds")
+
+# Load clock package
+library(methylclock)
+
+# get coefs for a clock
+Horvath_coefs = methylclockData::get_coefHorvath()
+Horvath_coefs = Horvath_coefs %>%
+  dplyr::select(c(CpGmarker,CoefficientTraining))
+df_stats_norm$CpG = rownames(df_stats_norm)
+df_stats_unnorm$CpG = rownames(df_stats_unnorm)
+
+# Intersect CpGs:
+df_horvath_norm = df_stats_norm %>%
+  filter(CpG %in% Horvath_coefs$CpGmarker)
+
+# wrangle data for plotting
+substrRight <- function(x, n){
+  substr(x, nchar(x)-n+1, nchar(x))
+}
+
+
+df_horvath_stats_A = df_horvath_norm[,(substrRight(colnames(df_horvath_norm),1) == "A")]
+df_horvath_stats_B = df_horvath_norm[,(substrRight(colnames(df_horvath_norm),1) == "B")]
+df_horvath_stats_C = df_horvath_norm[,(substrRight(colnames(df_horvath_norm),1) == "C")]
+df_horvath_stats_D = df_horvath_norm[,(substrRight(colnames(df_horvath_norm),1) == "D")]
+colnames(df_horvath_stats_A) = c("mean","stdev","range")
+df_horvath_stats_A$subject = "A"
+colnames(df_horvath_stats_B) = c("mean","stdev","range")
+df_horvath_stats_B$subject = "B"
+colnames(df_horvath_stats_C) = c("mean","stdev","range")
+df_horvath_stats_C$subject = "C"
+colnames(df_horvath_stats_D) = c("mean","stdev","range")
+df_horvath_stats_D$subject = "D"
+
+df_horvath_stats = rbind(df_horvath_stats_A,
+                         df_horvath_stats_B,
+                         df_horvath_stats_C,
+                         df_horvath_stats_D)
+
+# Reformat to allow for the plotting I want
+df_horvath_norm_melted = reshape2::melt(df_horvath_norm,ids = CpG)
+
+# Plot CpGs in Horvath clock
+ggplotgui::ggplot_shiny(df_horvath_stats)
+
+df = df_horvath_stats
+graph <- ggplot(df, aes(x = mean, y = range, colour = subject)) +
+  geom_point() +
+  facet_grid( . ~ subject ) +
+  ggtitle('Mean vs Range for Horvath CpGs') +
+  theme_bw()
+graph
+
+
+```
+## loop to do this for all clocks
+
+```{r}
+# Load clock package
+library(methylclock)
+
+# get coefs for a clock
+Horvath_coefs = methylclockData::get_coefHorvath()
+BLUP_coefs = methylclockData::get_coefBLUP()
+Bohlin_coefs = methylclockData::get_coefBohlin()
+EN_coefs = methylclockData::get_coefEN()
+EPIC_coefs = methylclockData::get_coefEPIC()
+Hannum_coefs = methylclockData::get_coefHannum()
+Horvath_coefs = methylclockData::get_coefHorvath()
+Levine_coefs = methylclockData::get_coefLevine()
+PedBE_coefs = methylclockData::get_coefPedBE()
+Skin_coefs = methylclockData::get_coefSkin()
+TL_coefs = methylclockData::get_coefTL()
+Wu_coefs = methylclockData::get_coefWu()
+
+list_coefs = list(BLUP_coefs,
+                  Bohlin_coefs,
+                  EN_coefs,
+                  EPIC_coefs,
+                  Hannum_coefs,
+                  Horvath_coefs,
+                  Levine_coefs,
+                  PedBE_coefs,
+                  Skin_coefs,
+                  TL_coefs,
+                  Wu_coefs
+)
+
+names = c("BLUP_coefs",
+                  "Bohlin_coefs",
+                  "EN_coefs",
+                  "EPIC_coefs",
+                  "Hannum_coefs",
+                  "Horvath_coefs",
+                  "Levine_coefs",
+                  "PedBE_coefs",
+                  "Skin_coefs",
+                  "TL_coefs",
+                  "Wu_coefs"
+)
+
+
+```
+
+
+### results normalized data
+
+```{r}
+  list_of_plots_normalizedData = list()
+
+
+for (i in 1:length(list_coefs)){
+  list_of_plots_normalizedData = list()
+  
+  # select clock
+  temp_coefs = list_coefs[[i]]
+  temp_coefs = temp_coefs %>%
+  dplyr::select(c(CpGmarker,CoefficientTraining))
+  
+  # Intersect CpGs:
+  df_temp_norm = df_stats_norm %>%
+  filter(CpG %in% temp_coefs$CpGmarker)
+  
+  # wrangle data for plotting
+  df_temp_norm_A = df_temp_norm[,(substrRight(colnames(df_temp_norm),1) == "A")]
+  df_temp_norm_B = df_temp_norm[,(substrRight(colnames(df_temp_norm),1) == "B")]
+  df_temp_norm_C = df_temp_norm[,(substrRight(colnames(df_temp_norm),1) == "C")]
+  df_temp_norm_D = df_temp_norm[,(substrRight(colnames(df_temp_norm),1) == "D")]
+  colnames(df_temp_norm_A) = c("mean","stdev","range")
+  df_temp_norm_A$subject = "A"
+  df_temp_norm_A <- merge(df_temp_norm_A, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+  colnames(df_temp_norm_B) = c("mean","stdev","range")
+  df_temp_norm_B$subject = "B"
+  df_temp_norm_B <- merge(df_temp_norm_B, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+  colnames(df_temp_norm_C) = c("mean","stdev","range")
+  df_temp_norm_C$subject = "C"
+  df_temp_norm_C<- merge(df_temp_norm_C, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+  colnames(df_temp_norm_D) = c("mean","stdev","range")
+  df_temp_norm_D$subject = "D"
+  df_temp_norm_D <- merge(df_temp_norm_D, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+
+  
+  df_temp_norm = rbind(df_temp_norm_A,
+                           df_temp_norm_B,
+                           df_temp_norm_C,
+                           df_temp_norm_D)
+
+  # Plot CpGs in Horvath clock
+  ggplotgui::ggplot_shiny(df_temp_norm)
+
+  graph <- ggplot(df_temp_norm, aes(x = mean, y = range, colour = subject,size = abs(CoefficientTraining))) +
+    geom_point(alpha = 0.2) +
+    scale_size(range = c(0.01,3)) +
+    facet_grid( . ~ subject ) +
+    ggtitle('Mean vs Range for CpGs',
+            subtitle = names[i]) +
+    theme_bw()
+  plot(graph)
+  
+  list_of_plots_normalizedData[i] = graph
+}
+names(list_of_plots_normalizedData) = names
+
+
+```
+
+i = 9 for skin clock
+```{r}
+for (i in 9:9){
+  list_of_plots_normalizedData = list()
+  
+  # select clock
+  temp_coefs = list_coefs[[i]]
+  temp_coefs = temp_coefs %>%
+  dplyr::select(c(CpGmarker,CoefficientTraining))
+  
+  # Intersect CpGs:
+  df_temp_norm = df_stats_norm %>%
+  filter(CpG %in% temp_coefs$CpGmarker)
+  
+  # wrangle data for plotting
+  df_temp_norm_A = df_temp_norm[,(substrRight(colnames(df_temp_norm),1) == "A")]
+  df_temp_norm_B = df_temp_norm[,(substrRight(colnames(df_temp_norm),1) == "B")]
+  df_temp_norm_C = df_temp_norm[,(substrRight(colnames(df_temp_norm),1) == "C")]
+  df_temp_norm_D = df_temp_norm[,(substrRight(colnames(df_temp_norm),1) == "D")]
+  colnames(df_temp_norm_A) = c("mean","stdev","range")
+  df_temp_norm_A$subject = "A"
+  df_temp_norm_A <- merge(df_temp_norm_A, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+  colnames(df_temp_norm_B) = c("mean","stdev","range")
+  df_temp_norm_B$subject = "B"
+  df_temp_norm_B <- merge(df_temp_norm_B, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+  colnames(df_temp_norm_C) = c("mean","stdev","range")
+  df_temp_norm_C$subject = "C"
+  df_temp_norm_C<- merge(df_temp_norm_C, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+  colnames(df_temp_norm_D) = c("mean","stdev","range")
+  df_temp_norm_D$subject = "D"
+  df_temp_norm_D <- merge(df_temp_norm_D, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+
+  
+  df_temp_norm = rbind(df_temp_norm_A,
+                           df_temp_norm_B,
+                           df_temp_norm_C,
+                           df_temp_norm_D)
+
+  # Plot CpGs in Horvath clock
+  ggplotgui::ggplot_shiny(df_temp_norm)
+
+  graph <- ggplot(df_temp_norm, aes(x = mean, y = range, colour = subject,size = abs(CoefficientTraining))) +
+    geom_point(alpha = 0.2) +
+    scale_size(range = c(0.01,3)) +
+    facet_grid( . ~ subject ) +
+    ggtitle('Mean vs Range for CpGs',
+            subtitle = names[i]) +
+    theme_bw()
+  plot(graph)
+  
+  list_of_plots_normalizedData[i] = graph
+}
+
+graph2 = graph + theme(
+  text = element_text(family = "Helvetica", 
+                            size = 6),
+  axis.title = element_text(size = 6)) + 
+  ggtitle("SeSAMe",subtitle = NULL) + 
+  labs(y= "Range of beta values among replicates", x = "Mean beta value")
+graph2
+
+graph2 = graph + theme(
+  text = element_text(family = "Helvetica", 
+                            size = 6),
+  axis.title = element_text(size = 6),
+  legend.position = "none") + 
+  ggtitle("SeSAMe",subtitle = NULL) + 
+  labs(y= "Range of beta values", x = "Mean beta value") + 
+  scale_color_manual(values = c("grey25","grey25","grey25","grey25"))
+graph2
+names(list_of_graphs) = names
+
+
+```
+
+
+### results unnormalized data
+
+```{r}
+list_of_graphs = list()
+
+for (i in 1:length(list_coefs)){
+  list_of_plots_normalizedData = list()
+  
+  # select clock
+  temp_coefs = list_coefs[[i]]
+  temp_coefs = temp_coefs %>%
+  dplyr::select(c(CpGmarker,CoefficientTraining))
+  
+  # Intersect CpGs:
+  df_temp_unnorm = df_stats_unnorm %>%
+  filter(CpG %in% temp_coefs$CpGmarker)
+  
+  # wrangle data for plotting
+  df_temp_unnorm_A = df_temp_unnorm[,(substrRight(colnames(df_temp_unnorm),1) == "A")]
+  df_temp_unnorm_B = df_temp_unnorm[,(substrRight(colnames(df_temp_unnorm),1) == "B")]
+  df_temp_unnorm_C = df_temp_unnorm[,(substrRight(colnames(df_temp_unnorm),1) == "C")]
+  df_temp_unnorm_D = df_temp_unnorm[,(substrRight(colnames(df_temp_unnorm),1) == "D")]
+  colnames(df_temp_unnorm_A) = c("mean","stdev","range")
+  df_temp_unnorm_A$subject = "A"
+  df_temp_unnorm_A <- merge(df_temp_unnorm_A, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+  colnames(df_temp_unnorm_B) = c("mean","stdev","range")
+  df_temp_unnorm_B$subject = "B"
+  df_temp_unnorm_B <- merge(df_temp_unnorm_B, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+  colnames(df_temp_unnorm_C) = c("mean","stdev","range")
+  df_temp_unnorm_C$subject = "C"
+  df_temp_unnorm_C<- merge(df_temp_unnorm_C, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+  colnames(df_temp_unnorm_D) = c("mean","stdev","range")
+  df_temp_unnorm_D$subject = "D"
+  df_temp_unnorm_D <- merge(df_temp_unnorm_D, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+
+  
+  df_temp_unnorm = rbind(df_temp_unnorm_A,
+                           df_temp_unnorm_B,
+                           df_temp_unnorm_C,
+                           df_temp_unnorm_D)
+
+  graph <- ggplot(df_temp_unnorm, aes(x = mean, y = range, colour = subject,size = abs(CoefficientTraining))) +
+    geom_point(alpha = 0.2) +
+    scale_size(range = c(0.01,3)) +
+    facet_grid( . ~ subject ) +
+    ggtitle('Mean vs Range for CpGs',
+            subtitle = names[i]) +
+    theme_bw()
+  plot(graph)
+  
+  list_of_graphs[i] = graph
+}
+
+
+```
+
+
+i = 9 for skinclock
+```{r}
+for (i in 9:9){
+  list_of_plots_normalizedData = list()
+  
+  # select clock
+  temp_coefs = list_coefs[[i]]
+  temp_coefs = temp_coefs %>%
+  dplyr::select(c(CpGmarker,CoefficientTraining))
+  
+  # Intersect CpGs:
+  df_temp_unnorm = df_stats_unnorm %>%
+  filter(CpG %in% temp_coefs$CpGmarker)
+  
+  # wrangle data for plotting
+  df_temp_unnorm_A = df_temp_unnorm[,(substrRight(colnames(df_temp_unnorm),1) == "A")]
+  df_temp_unnorm_B = df_temp_unnorm[,(substrRight(colnames(df_temp_unnorm),1) == "B")]
+  df_temp_unnorm_C = df_temp_unnorm[,(substrRight(colnames(df_temp_unnorm),1) == "C")]
+  df_temp_unnorm_D = df_temp_unnorm[,(substrRight(colnames(df_temp_unnorm),1) == "D")]
+  colnames(df_temp_unnorm_A) = c("mean","stdev","range")
+  df_temp_unnorm_A$subject = "A"
+  df_temp_unnorm_A <- merge(df_temp_unnorm_A, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+  colnames(df_temp_unnorm_B) = c("mean","stdev","range")
+  df_temp_unnorm_B$subject = "B"
+  df_temp_unnorm_B <- merge(df_temp_unnorm_B, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+  colnames(df_temp_unnorm_C) = c("mean","stdev","range")
+  df_temp_unnorm_C$subject = "C"
+  df_temp_unnorm_C<- merge(df_temp_unnorm_C, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+  colnames(df_temp_unnorm_D) = c("mean","stdev","range")
+  df_temp_unnorm_D$subject = "D"
+  df_temp_unnorm_D <- merge(df_temp_unnorm_D, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+
+  
+  df_temp_unnorm = rbind(df_temp_unnorm_A,
+                           df_temp_unnorm_B,
+                           df_temp_unnorm_C,
+                           df_temp_unnorm_D)
+
+  graph <- ggplot(df_temp_unnorm, aes(x = mean, y = range, colour = subject,size = abs(CoefficientTraining))) +
+    geom_point(alpha = 0.2) +
+    scale_size(range = c(0.01,3)) +
+    facet_grid( . ~ subject ) +
+    ggtitle('Mean vs Range for CpGs',
+            subtitle = names[i]) +
+    theme_bw()
+  plot(graph)
+  
+  list_of_graphs[i] = graph
+}
+
+
+
+
+graph3 = graph + theme(
+  text = element_text(family = "Helvetica", 
+                            size = 6),
+  axis.title = element_text(size = 6),
+  legend.position = "none") + 
+  ggtitle("Raw",subtitle = NULL) + 
+  labs(y= "Range of beta values", x = "Mean beta value") + 
+  scale_color_manual(values = c("grey25","grey25","grey25","grey25"))
+graph3
+
+```
+
+# plot for figure 7
+
+```{r}
+library(patchwork)
+
+
+fig7 = (graph3 / graph2 / (fig7_c)) #note: fig7_c from "single_variable_CpG_from_skin_clock.Rmd"
+fig7_for_pdf = (fig7 | (ages_raw / ages_sesame / ages_combat)) # note: ages from "age_predictions.Rmd"
+```
+
+```{r}
+fig7_for_pdf
+
+
+library(patchwork)
+
+### Plotting
+pdf_export_directory = '~/dnamstability/dnamstability-abutler/pdf_plots/' #where I'm saving figures
+pdf(file = paste0(pdf_export_directory, "fig7_vizualize_variable_cpgs_in_clocks.pdf"),   # The directory you want to save the file in
+    width = (180/25.4), # The width of the plot in inches (converted from mm)
+    height = (110/25.4)) # The height of the plot in inches
+fig7_for_pdf
+dev.off()
+###
+```
+
+
+
+## cg03183882: A single CpG with high range and high coefficient in the skin clock
+```{r}
+# Intersect CpGs:
+df_temp_unnorm = df_stats_unnorm %>%
+  filter(CpG %in% Skin_coefs$CpGmarker)
+
+df_temp_norm = df_stats_norm %>%
+  filter(CpG %in% Skin_coefs$CpGmarker)
+
+df_temp_norm = df_temp_norm %>%
+  filter(range_A > 0.25)
+
+df_temp_unnorm = df_temp_unnorm %>%
+  filter(range_A > 0.25)
+
+temp_coefs = Skin_coefs %>%
+  dplyr::select(c(CpGmarker,CoefficientTraining))
+
+df_temp_norm = merge(df_temp_norm, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+df_temp_unnorm = merge(df_temp_unnorm, temp_coefs, by.x = "row.names", by.y = "CpGmarker")
+intersect(rownames(df_temp_norm), rownames(df_temp_unnorm))
+
+# and cg03183882 is the one with an abs(coefficient) > 1 in the Skin clock
+# note that its range is actually higher in sesame-normalized data
+```

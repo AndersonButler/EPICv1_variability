@@ -1,0 +1,910 @@
+---
+title: "Centered and scaled betas within subject - various comparisons"
+output: html_notebook
+---
+
+```{r}
+knitr::opts_chunk$set(dev = "png", dev.args = list(type = "cairo-png"))
+```
+
+
+The goal of this notebook is to center and scale beta values within subject in pooled samples, and make various comparisons.
+
+A major goal is to compare unnormalized, normalized, and normalized + combat.
+
+First, I will repeat the initial iteration of this analysis, where centered and scaled data were compared based on Sentrix Position (chamber number), with normalized, unnormalized, and normalized + combat data.
+
+# Load data
+```{r}
+library(tidyverse)
+library(knitr)
+library(limma)
+library(minfi)
+library(RColorBrewer)
+library(Gviz)
+library(DMRcate)
+library(stringr)
+library(ggplot2)
+library(ggfortify)
+library(patchwork)
+library(skimr)
+library(esquisse)
+library(rcartocolor)
+library(paletteer)
+library(dplyr)
+library(readr)
+```
+
+```{r}
+
+# load data
+df_normalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221111_dnamstability_normalizedBetas_sesame_abutler.Rds")
+df_unnormalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221111_dnamstability_unnormalizedBetas_sesame_abutler.Rds")
+df_normalized_with_combat = read_csv("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_fluorescence_values/sesameAndCombat_normalized_betas_for_kras_20230317.csv")
+
+rownames(df_normalized_with_combat) = df_normalized_with_combat$cpgs # rownames for the csv
+df_normalized_with_combat$cpgs = NULL
+
+df_normalized$X205832330169_R03C01 = NULL #drop outlier
+df_unnormalized$X205832330169_R03C01 = NULL
+df_normalized_with_combat$X205832330169_R03C01 = NULL
+
+
+# load sample annotation
+SampleAnnotation = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221020_dnamstability_SampleAnnotation_for_ibishof.Rds")
+SampleAnnotation$grouping_variable = as.factor(SampleAnnotation$grouping_variable)
+SampleAnnotation$XChipID
+
+
+remove_na_10percent <- function(dataframe){
+  dataframe <- dataframe[rowSums(is.na(dataframe))/ncol(dataframe) < 0.1,]
+  return(dataframe)
+}
+
+df_normalized = remove_na_10percent(df_normalized)
+df_unnormalized = remove_na_10percent(df_unnormalized)
+df_normalized_with_combat = remove_na_10percent(df_normalized_with_combat)
+```
+
+# Standardize within-subject
+
+
+```{r}
+# Rewrote original code as a function
+scale_data_by_grouping_variable <- function(data, annotation_df, subject_col = "XChipID", grouping_var = "subjectLetter") {
+  groups <- unique(annotation_df[[grouping_var]])
+  
+  for (i in seq_along(groups)) {
+  
+    # select samples from each group (subjectLetter here)
+    subject_df_temp <- data %>%
+      select(any_of(annotation_df[[subject_col]][annotation_df[[grouping_var]]==groups[i]])) %>%
+      select(any_of(annotation_df$XChipID[annotation_df$pooled==TRUE])) 
+    
+    # pause pipeline to save colnames (will be lost when using scale() below)
+    colnames_temp = colnames(subject_df_temp) 
+    
+    # continue scaling
+    subject_df_temp = subject_df_temp %>%
+          apply(1,scale) %>%
+          t() %>%
+          as.data.frame()
+    
+    # reapply colnames
+    colnames(subject_df_temp) = colnames_temp
+    
+    if (i == 1) {
+      subject_df_scaled <- subject_df_temp
+    } else {
+      subject_df_scaled <- bind_cols(subject_df_temp,subject_df_scaled)
+    }
+  }
+  return(subject_df_scaled)
+}
+
+# Applied
+df_normalized_s = scale_data_by_grouping_variable(data = df_normalized, 
+                                                  annotation_df = SampleAnnotation,
+                                                  subject_col = "XChipID", 
+                                                  grouping_var = "subjectLetter")
+df_unnormalized_s = scale_data_by_grouping_variable(data = df_unnormalized, 
+                                                  annotation_df = SampleAnnotation,
+                                                  subject_col = "XChipID", 
+                                                  grouping_var = "subjectLetter" )
+df_normalized_with_combat_s = scale_data_by_grouping_variable(data = df_normalized_with_combat, 
+                                                  annotation_df = SampleAnnotation,
+                                                  subject_col = "XChipID", 
+                                                  grouping_var = "subjectLetter" )
+
+```
+
+
+
+
+
+
+sanity check
+```{r}
+# each subject should now be centered
+```
+
+
+
+
+
+## Average across 4 subjects
+```{r}
+# pooled samples
+df_unnormalized_s_pooled = df_unnormalized_s %>%
+  dplyr::select(SampleAnnotation$XChipID[SampleAnnotation$pooled==TRUE])
+df_normalized_s_pooled = df_normalized_s %>%
+  dplyr::select(SampleAnnotation$XChipID[SampleAnnotation$pooled==TRUE])
+df_normalized_with_combat_s_pooled = df_normalized_with_combat_s %>%
+  dplyr::select(SampleAnnotation$XChipID[SampleAnnotation$pooled==TRUE])
+
+# average_by_subjects_in_pooled_samples
+average_by_subjects_in_pooled_samples = function(df){
+positions = unique(SampleAnnotation$lane)
+for (i in 1:length(positions)){
+  temp = df %>%
+    dplyr::select(SampleAnnotation$XChipID[SampleAnnotation$pooled==TRUE]) %>%
+    dplyr::select(any_of(SampleAnnotation$XChipID[SampleAnnotation$lane==positions[i]])) %>% apply(1,mean,na.rm=TRUE)
+  if (i == 1){
+    temp2 = data.frame(CpG = rownames(df),
+                       temp1 = temp)
+  } else {
+    temp2 = cbind(temp2, temp)
+  }
+}
+  return(temp2)
+}
+
+# chamber number means across four subjects
+df_unnormalized_s_pooled_means = average_by_subjects_in_pooled_samples(df_unnormalized_s_pooled)
+
+df_normalized_s_pooled_means = average_by_subjects_in_pooled_samples(df_normalized_s_pooled)
+
+df_normalized_with_combat_s_pooled_means = average_by_subjects_in_pooled_samples(df_normalized_with_combat_s_pooled)
+
+```
+
+
+Melt columns and add in ID variables
+```{r}
+ids_to_bind = t(SampleAnnotation)
+ids_to_bind = data.frame(ids_to_bind)
+colnames(ids_to_bind) = ids_to_bind["XChipID",]
+
+# putting variable info into a single string string (new column name) to preserve while melting
+SampleAnnotation$BigName = paste(SampleAnnotation$XChipID, 
+                                 SampleAnnotation$subjectLetter,
+                                 SampleAnnotation$pooled,
+                                 SampleAnnotation$grouping_variable_bswa,
+                                 SampleAnnotation$grouping_variable,
+                                 SampleAnnotation$grouping_variable2,
+                                 SampleAnnotation$array,
+                                 SampleAnnotation$lane,
+                                 sep = '.')
+
+for (i in 1:length(colnames(df_normalized_with_combat_s))){
+  j = which(SampleAnnotation$XChipID==colnames(df_normalized_with_combat_s)[i])
+  colnames(df_normalized_with_combat_s)[i] = SampleAnnotation$BigName[j]
+}
+df_normalized_with_combat_s = reshape2::melt(df_normalized_with_combat_s)
+
+for (i in 1:length(colnames(df_normalized_s))){
+  j = which(SampleAnnotation$XChipID==colnames(df_normalized_s)[i])
+  colnames(df_normalized_s)[i] = SampleAnnotation$BigName[j]
+}
+df_normalized_s = reshape2::melt(df_normalized_s)
+
+for (i in 1:length(colnames(df_unnormalized_s))){
+  j = which(SampleAnnotation$XChipID==colnames(df_unnormalized_s)[i])
+  colnames(df_unnormalized_s)[i] = SampleAnnotation$BigName[j]
+}
+df_unnormalized_s = reshape2::melt(df_unnormalized_s)
+
+# Split the variable info back out (delimited by ".")
+split_column_name <- function(df, column_name, delimiter) {
+  col_data <- as.character(df[[column_name]]) # convert column to character type
+  split_data <- strsplit(col_data, delimiter) # split the data by the delimiter
+  split_data <- do.call(rbind, split_data) # convert the list to a matrix
+  df <- cbind(df, split_data) # append split data as new columns
+  return(df)
+}
+
+df_normalized_s_pooled_means = split_column_name(df_normalized_s,"variable","\\.")
+df_unnormalized_s_pooled_means = split_column_name(df_unnormalized_s,"variable","\\.")
+df_normalized_with_combat_s_pooled_means = split_column_name(df_normalized_with_combat_s,"variable","\\.")
+
+
+
+```
+
+```{r}
+# Rename columns
+new_colnames = c("variable","value","XChipID","subject","pooled","grouping_var_bswa","grouping_var","grouping_var2","array","lane")
+colnames(df_normalized_s_pooled_means) = new_colnames
+colnames(df_normalized_with_combat_s_pooled_means) = new_colnames
+colnames(df_unnormalized_s_pooled_means) = new_colnames
+```
+
+Make plots
+```{r}
+graph1 <- ggplot(df_unnormalized_s_pooled_means, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.05, show.legend = FALSE) +
+  theme_bw() + 
+  facet_grid( lane ~ . ) +
+  ggtitle("Distribution of centered and scaled beta values in unnormalized data",
+          "Avg of 4 subjects")
+graph1
+
+graph2<- ggplot(df_normalized_s_pooled_means, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.05, show.legend = FALSE) +
+  theme_bw() +
+  facet_grid( lane ~ . ) +
+  ggtitle("Distribution of centered and scaled beta values in normalized data",
+          "Avg of 4 subjects")
+graph2
+
+graph3 <- ggplot(df_normalized_with_combat_s_pooled_means, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.05, show.legend = FALSE) +
+  theme_bw() +
+  facet_grid( lane ~ . )+
+  ggtitle("Distribution of centered and scaled beta values in normalized data",
+          "Avg of 4 subjects - Sentrix position corrected using ComBat")
+graph3
+
+# same as last figure, but with the legend there so we can crop this
+graph4 <- ggplot(df_normalized_with_combat_s_pooled_means, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.05) +
+  theme_bw() +
+  facet_grid( lane ~ . ) +
+  ggtitle("Distribution of centered and scaled beta values in normalized data",
+          "Avg of 4 subjects - Sentrix position corrected using ComBat")
+graph4
+
+composite_graph = graph1 + graph2 + graph4
+composite_graph
+```
+Revised plots 07172023
+```{r}
+graph1 <- ggplot(df_unnormalized_s_pooled_means, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.075, show.legend = FALSE) +
+  theme_bw() + 
+  facet_grid( lane ~ . ) +
+  theme(text = element_text(size = 5))  +
+  ggtitle("Raw")
+graph1
+
+graph2<- ggplot(df_normalized_s_pooled_means, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.075, show.legend = FALSE) +
+  theme_bw() +
+  facet_grid( lane ~ . ) +
+  theme(text = element_text(size = 5))  +
+  ggtitle("SeSAMe")
+graph2
+
+graph3 <- ggplot(df_normalized_with_combat_s_pooled_means, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.075, show.legend = FALSE) +
+  theme_bw() +
+  facet_grid( lane ~ . )+
+  theme(text = element_text(size = 5))  +
+  ggtitle("SeSAMe + ComBat")
+graph3
+
+# same as last figure, but with the legend there so we can crop this
+graph4 <- ggplot(df_normalized_with_combat_s_pooled_means, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.075) +
+  theme_bw() +
+  facet_grid( lane ~ . ) +
+  theme(text = element_text(size = 5))  +
+  ggtitle("SeSAMe + ComBat")
+graph4
+
+composite_graph = graph1 + graph2 + graph3
+composite_graph
+```
+
+```{r}
+### Plotting
+pdf_export_directory = '~/dnamstability/dnamstability-abutler/pdf_plots/' #where I'm saving figures
+pdf(file = paste0(pdf_export_directory, "distributions_of_centered_and_scaled_betas.pdf.pdf"),   # The directory you want to save the file in
+    width = (130/25.4), # The width of the plot in inches (converted from mm)
+    height = (90/25.4)) # The height of the plot in inches
+composite_graph
+dev.off()
+###
+
+
+```
+
+<!-- ### Fig3A_Distributions_of_centered_and_scaled_betas.pdf -->
+<!-- ```{r, Fig3A_Distributions_of_centered_and_scaled_betas.pdf} -->
+<!-- # save_pdf -->
+<!-- pdf("/home/sagemaker-user/dnamstability/dnamstability-abutler/pdf_plots/Distributions_of_centered_and_scaled_betas.pdf",width = 5, height = 3,pointsize=10) -->
+<!-- composite_graph -->
+<!-- dev.off() -->
+<!-- ``` -->
+
+
+## Average across 4 arrays
+```{r}
+# average_by_subjects_in_pooled_samples
+arrays = unique(SampleAnnotation$array[SampleAnnotation$pooled==TRUE])
+average_arrays_instead_of_chamber_number = function(df){
+arrays = unique(SampleAnnotation$array[SampleAnnotation$pooled==TRUE])
+for (i in 1:length(arrays)){
+  temp = df %>%
+    dplyr::select(SampleAnnotation$XChipID[SampleAnnotation$pooled==TRUE]) %>%
+    dplyr::select(any_of(SampleAnnotation$XChipID[SampleAnnotation$array==arrays[i]])) %>% apply(1,mean,na.rm=TRUE)
+  if (i == 1){
+    temp2 = data.frame(CpG = rownames(df),
+                       temp1 = temp)
+  } else {
+    temp2 = cbind(temp2, temp)
+  }
+}
+  return(temp2)
+}
+df_unnormalized_s_pooled_arrayMeans = average_arrays_instead_of_chamber_number(df_unnormalized_s_pooled)
+
+df_normalized_s_pooled_arrayMeans = average_arrays_instead_of_chamber_number(df_normalized_s_pooled)
+
+df_normalized_with_combat_s_pooled_arrayMeans = average_arrays_instead_of_chamber_number(df_normalized_with_combat_s_pooled)
+
+
+array_colnames = c("CpG",as.character(arrays))
+
+colnames(df_unnormalized_s_pooled_arrayMeans) =array_colnames
+colnames(df_normalized_s_pooled_arrayMeans) =array_colnames
+colnames(df_normalized_with_combat_s_pooled_arrayMeans) =array_colnames
+
+```
+
+```{r}
+melted_df_unnormalized_s_pooled_arrayMeans = reshape2::melt(df_unnormalized_s_pooled_arrayMeans,id.vars = "CpG")
+
+melted_df_normalized_s_pooled_arrayMeans = reshape2::melt(df_normalized_s_pooled_arrayMeans,id.vars = "CpG")
+
+melted_df_normalized_with_combat_s_pooled_arrayMeans = reshape2::melt(df_normalized_with_combat_s_pooled_arrayMeans,id.vars = "CpG")
+
+
+
+
+# The code below will generate the graph:
+graph1 <- ggplot(melted_df_unnormalized_s_pooled_arrayMeans, aes(x = value, fill = variable)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.02,show.legend = FALSE) +
+  theme_bw() + 
+    scale_fill_paletteer_d("colorblindr::OkabeIto") + 
+  facet_grid(rows = "variable")
+graph1
+
+graph2 <- ggplot(melted_df_normalized_s_pooled_arrayMeans, aes(x = value, fill = variable)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.02,show.legend = FALSE) +
+  theme_bw() + 
+  scale_fill_paletteer_d("colorblindr::OkabeIto") + 
+  facet_grid(rows = "variable")
+graph2
+
+graph3 <- ggplot(melted_df_normalized_with_combat_s_pooled_arrayMeans, aes(x = value, fill = variable)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.02,show.legend = FALSE) +
+  theme_bw() + 
+  scale_fill_paletteer_d("colorblindr::OkabeIto") + 
+  facet_grid(rows = "variable")
+graph3
+
+composite_graph = graph1 + graph2 + graph3
+
+graph4 <- ggplot(melted_df_normalized_with_combat_s_pooled_arrayMeans, aes(x = value, fill = variable)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.02) +
+  theme_bw() + 
+  scale_fill_paletteer_d("colorblindr::OkabeIto") + 
+  facet_grid(rows = "variable")
+graph4
+```
+
+```{r, Fig3B_Distributions_of_centered_and_scaled_betas_arrays.pdf}
+# save_pdf
+pdf("/home/sagemaker-user/dnamstability/dnamstability-abutler/pdf_plots/Fig3A_Distributions_of_centered_and_scaled_betas_in_arrays.pdf",width = 5, height = 3,pointsize=10)
+composite_graph
+dev.off()
+
+```
+
+# Average across arrays not just pooled
+
+```{r}
+scale_data_by_grouping_variable <- function(data, annotation_df, subject_col = "XChipID", grouping_var = "subjectLetter") {
+  groups <- unique(annotation_df[[grouping_var]])
+  
+  for (i in seq_along(groups)) {
+  
+    # select samples from each group (subjectLetter here)
+    subject_df_temp <- data %>%
+      select(any_of(annotation_df[[subject_col]][annotation_df[[grouping_var]]==groups[i]])) #%>%
+      #select(any_of(annotation_df$XChipID[annotation_df$pooled==TRUE])) 
+    
+    # pause pipeline to save colnames (will be lost when using scale() below)
+    colnames_temp = colnames(subject_df_temp) 
+    
+    # continue scaling
+    subject_df_temp = subject_df_temp %>%
+          apply(1,scale) %>%
+          t() %>%
+          as.data.frame()
+    
+    # reapply colnames
+    colnames(subject_df_temp) = colnames_temp
+    
+    if (i == 1) {
+      subject_df_scaled <- subject_df_temp
+    } else {
+      subject_df_scaled <- bind_cols(subject_df_temp,subject_df_scaled)
+    }
+  }
+  return(subject_df_scaled)
+}
+
+# Applied
+df_normalized_s_pooledAndNumbered = scale_data_by_grouping_variable(data = df_normalized, 
+                                                  annotation_df = SampleAnnotation,
+                                                  subject_col = "XChipID", 
+                                                  grouping_var = "subjectLetter")
+df_unnormalized_s_pooledAndNumbered = scale_data_by_grouping_variable(data = df_unnormalized, 
+                                                  annotation_df = SampleAnnotation,
+                                                  subject_col = "XChipID", 
+                                                  grouping_var = "subjectLetter" )
+df_normalized_with_combat_s_pooledAndNumbered = scale_data_by_grouping_variable(data = df_normalized_with_combat, 
+                                                  annotation_df = SampleAnnotation,
+                                                  subject_col = "XChipID", 
+                                                  grouping_var = "subjectLetter" )
+
+# average_by_subjects
+average_arrays_instead_of_chamber_number = function(df){
+arrays = unique(SampleAnnotation$array)
+for (i in 1:length(arrays)){
+  temp = df %>%
+    dplyr::select(any_of(SampleAnnotation$XChipID[SampleAnnotation$array==arrays[i]])) %>% apply(1,mean,na.rm=TRUE)
+  if (i == 1){
+    temp2 = data.frame(CpG = rownames(df),
+                       temp1 = temp)
+  } else {
+    temp2 = cbind(temp2, temp)
+  }
+}
+  return(temp2)
+}
+df_unnormalized_s_pooledAndNumbered_arrayMeans = average_arrays_instead_of_chamber_number(df_unnormalized_s_pooledAndNumbered)
+
+df_normalized_s_pooledAndNumbered_arrayMeans = average_arrays_instead_of_chamber_number(df_normalized_s_pooledAndNumbered)
+
+df_normalized_with_combat_s_pooledAndNumbered_arrayMeans = average_arrays_instead_of_chamber_number(df_normalized_with_combat_s_pooledAndNumbered)
+
+arrays = unique(SampleAnnotation$array)
+array_colnames = c("CpG",as.character(arrays))
+
+colnames(df_unnormalized_s_pooledAndNumbered_arrayMeans) =array_colnames
+colnames(df_normalized_s_pooledAndNumbered_arrayMeans) =array_colnames
+colnames(df_normalized_with_combat_s_pooledAndNumbered_arrayMeans) =array_colnames
+
+
+melted_df_unnormalized_s_pooledAndNumbered_arrayMeans = reshape2::melt(df_unnormalized_s_pooledAndNumbered_arrayMeans,id.vars = "CpG")
+
+melted_df_normalized_s_pooledAndNumbered_arrayMeans = reshape2::melt(df_normalized_s_pooledAndNumbered_arrayMeans,id.vars = "CpG")
+
+melted_df_normalized_with_combat_s_pooledAndNumbered_arrayMeans = reshape2::melt(df_normalized_with_combat_s_pooledAndNumbered_arrayMeans,id.vars = "CpG")
+
+
+
+
+# The code below will generate the graph:
+library(paletteer)
+graph1 <- ggplot(melted_df_unnormalized_s_pooledAndNumbered_arrayMeans, aes(x = value, fill = variable)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.02,show.legend = FALSE) +
+  theme_bw() + 
+    scale_fill_paletteer_d("colorblindr::OkabeIto") + 
+  facet_grid(rows = "variable")
+graph1
+
+graph2 <- ggplot(melted_df_normalized_s_pooledAndNumbered_arrayMeans, aes(x = value, fill = variable)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.02,show.legend = FALSE) +
+  theme_bw() + 
+  scale_fill_paletteer_d("colorblindr::OkabeIto") + 
+  facet_grid(rows = "variable")
+graph2
+
+graph3 <- ggplot(melted_df_normalized_with_combat_s_pooledAndNumbered_arrayMeans, aes(x = value, fill = variable)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.02,show.legend = FALSE) +
+  theme_bw() + 
+  scale_fill_paletteer_d("colorblindr::OkabeIto") + 
+  facet_grid(rows = "variable")
+graph3
+
+composite_graph = graph1 + graph2 + graph3
+
+graph4 <- ggplot(melted_df_normalized_with_combat_s_pooledAndNumbered_arrayMeans, aes(x = value, fill = variable)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.02) +
+  theme_bw() + 
+  scale_fill_paletteer_d("colorblindr::OkabeIto") + 
+  facet_grid(rows = "variable")
+graph4
+
+library(patchwork)
+composite_graph = graph1 + graph2 + graph3
+composite_graph
+```
+
+```{r}
+library(monochromeR)
+greys = generate_palette("grey", modification = "go_darker", 
+                 n_colours = 8, view_palette = TRUE)
+
+graph1 <- ggplot(melted_df_unnormalized_s_pooledAndNumbered_arrayMeans, aes(x = value, fill = variable)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.02,show.legend = FALSE) +
+  theme_bw() + 
+  scale_fill_manual(values = greys)+
+  facet_grid(rows = "variable") +
+  theme(text = element_text(size = 6))  +
+  ggtitle("Raw")
+graph1
+
+graph2 <- ggplot(melted_df_normalized_s_pooledAndNumbered_arrayMeans, aes(x = value, fill = variable)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.02,show.legend = FALSE) +
+  theme_bw() + 
+  scale_fill_manual(values = greys)+
+  facet_grid(rows = "variable") +
+  theme(text = element_text(size = 6))  +
+  ggtitle("SeSAMe")
+graph2
+
+graph3 <- ggplot(melted_df_normalized_with_combat_s_pooledAndNumbered_arrayMeans, aes(x = value, fill = variable)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.02,show.legend = FALSE) +
+  theme_bw() + 
+  scale_fill_manual(values = greys)+
+  facet_grid(rows = "variable") +
+  theme(text = element_text(size = 6))  +
+  ggtitle("SeSAMe + ComBat")
+graph3
+
+composite_graph = graph1 + graph2 + graph3
+composite_graph
+```
+
+```{r}
+### Plotting
+pdf_export_directory = '~/dnamstability/dnamstability-abutler/pdf_plots/' #where I'm saving figures
+pdf(file = paste0(pdf_export_directory, "distributions_of_centered_and_scaled_betas_by_array_140.pdf"),   # The directory you want to save the file in
+    width = (130/25.4), # The width of the plot in inches (converted from mm)
+    height = (140/25.4)) # The height of the plot in inches
+composite_graph
+dev.off()
+###
+```
+
+
+
+## curves before taking averages
+
+```{r}
+df_unnormalized_s_means_pooled = df_unnormalized_s %>%
+  filter(pooled = TRUE)
+df_normalized_s_means_pooled = df_normalized_s %>%
+  filter(pooled = TRUE)
+df_normalized_with_combat_s_means_pooled = df_normalized_with_combat_s %>%
+  filter(pooled = TRUE)
+
+df_unnormalized_s_means_pooled = apply(df_unnormalized_s_means_pooled,1,mean,na.rm=TRUE )
+df_normalized_s_means_pooled = apply(df_normalized_s_means_pooled,1,mean,na.rm=TRUE )
+df_normalized_with_combat_s_means_pooled = apply(df_normalized_with_combat_s_means_pooled,1,mean,na.rm=TRUE )
+
+
+
+graph1 <- ggplot(df_unnormalized_s_means_pooled, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.05) +
+  theme_bw() + 
+  facet_grid( lane ~ . ) + 
+  ggtitle("Distribution of centered and scaled beta values in unnormalized data",
+          "Avg of 4 subjects")
+graph1
+
+graph2<- ggplot(df_normalized_s_means_pooled, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.05) +
+  theme_bw() +
+  facet_grid( lane ~ . ) + 
+  ggtitle("Distribution of centered and scaled beta values in normalized data",
+          "Avg of 4 subjects")
+graph2
+
+graph3 <- ggplot(df_normalized_with_combat_s_means_pooled, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.05) +
+  theme_bw() +
+  facet_grid( lane ~ . ) +
+  ggtitle("Distribution of centered and scaled beta values in normalized data",
+          "Avg of 4 subjects - Sentrix position corrected using ComBat")
+graph3
+```
+
+
+## curves without taking averages
+```{r}
+#ggplotgui::ggplot_shiny(df_unnormalized_s)
+df_unnormalized_s_pooled = df_unnormalized_s %>%
+  filter(pooled = TRUE)
+df_normalized_s_pooled = df_normalized_s %>%
+  filter(pooled = TRUE)
+df_normalized_with_combat_s_pooled = df_normalized_with_combat_s %>%
+  filter(pooled = TRUE)
+
+
+
+# The code below will generate the graph:
+graph1 <- ggplot(df_unnormalized_s_pooled, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.05) +
+  theme_bw() + 
+  facet_grid( lane ~ . ) + 
+  ggtitle("Distribution of centered and scaled beta values in unnormalized data")
+graph1
+
+graph2<- ggplot(df_normalized_s_pooled, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.05) +
+  theme_bw() +
+  facet_grid( lane ~ . ) + 
+  ggtitle("Distribution of centered and scaled beta values in normalized data")
+graph2
+
+graph3 <- ggplot(df_normalized_with_combat_s_pooled, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.05) +
+  theme_bw() +
+  facet_grid( lane ~ . ) +
+  ggtitle("Distribution of centered and scaled beta values in normalized data",
+          "Sentrix position corrected using ComBat")
+graph3
+
+
+```
+
+
+
+
+
+
+```{r}
+graph1 <- ggplot(df_unnormalized_s, aes(x = value, fill = array)) +
+  geom_histogram(position = 'identity', alpha = 0.5, binwidth = 0.05) +
+  theme_bw() + 
+  facet_grid( array ~ . )
+graph
+
+graph2 <- ggplot(df_unnormalized_s, aes(x = value, fill = array)) +
+  geom_histogram(position = 'identity', alpha = 0.5, binwidth = 0.05) +
+  theme_bw() +
+  facet_grid( array ~ . )
+graph
+
+graph3 <- ggplot(df_normalized_with_combat_s, aes(x = value, fill = array)) +
+  geom_histogram(position = 'identity', alpha = 0.5, binwidth = 0.05) +
+  theme_bw() +
+  facet_grid( array ~ . )
+graph
+```
+
+
+```{r}
+graph <- ggplot(df_unnormalized_s, aes(x = value, fill = array)) +
+  geom_histogram(position = 'identity', alpha = 0.5, binwidth = 0.05) +
+  theme_bw() + 
+  facet_grid( array ~ . )
+graph
+
+graph <- ggplot(df_unnormalized_s, aes(x = value, fill = array)) +
+  geom_histogram(position = 'identity', alpha = 0.5, binwidth = 0.05) +
+  theme_bw() +
+  facet_grid( array ~ . )
+graph
+
+graph <- ggplot(df_normalized_with_combat_s, aes(x = value, fill = array)) +
+  geom_histogram(position = 'identity', alpha = 0.5, binwidth = 0.05) +
+  theme_bw() +
+  facet_grid( array ~ . )
+graph
+```
+
+# Average within arrays, so that we don't mix array and chamber number variation 
+
+```{r}
+
+# load data
+df_normalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221111_dnamstability_normalizedBetas_sesame_abutler.Rds")
+df_unnormalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221111_dnamstability_unnormalizedBetas_sesame_abutler.Rds")
+df_normalized_with_combat = read_csv("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_fluorescence_values/sesameAndCombat_normalized_betas_for_kras_20230317.csv")
+
+rownames(df_normalized_with_combat) = df_normalized_with_combat$cpgs # rownames for the csv
+df_normalized_with_combat$cpgs = NULL
+
+df_normalized$X205832330169_R03C01 = NULL #drop outlier
+df_unnormalized$X205832330169_R03C01 = NULL
+df_normalized_with_combat$X205832330169_R03C01 = NULL
+
+
+# load sample annotation
+SampleAnnotation = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221020_dnamstability_SampleAnnotation_for_ibishof.Rds")
+SampleAnnotation$grouping_variable = as.factor(SampleAnnotation$grouping_variable)
+SampleAnnotation$XChipID
+
+
+remove_na_10percent <- function(dataframe){
+  dataframe <- dataframe[rowSums(is.na(dataframe))/ncol(dataframe) < 0.1,]
+  return(dataframe)
+}
+
+df_normalized = remove_na_10percent(df_normalized)
+df_unnormalized = remove_na_10percent(df_unnormalized)
+df_normalized_with_combat = remove_na_10percent(df_normalized_with_combat)
+```
+
+
+
+```{r}
+# Rewrote original code as a function
+scale_data_by_grouping_variable <- function(data, annotation_df, subject_col = "XChipID", grouping_var = "subjectLetter") {
+  groups <- unique(annotation_df[[grouping_var]])
+  
+  for (i in seq_along(groups)) {
+  
+    # select samples from each group (subjectLetter here)
+    subject_df_temp <- data %>%
+      select(any_of(annotation_df[[subject_col]][annotation_df[[grouping_var]]==groups[i]])) %>%
+      select(any_of(annotation_df$XChipID[annotation_df$pooled==TRUE])) 
+    
+    # pause pipeline to save colnames (will be lost when using scale() below)
+    colnames_temp = colnames(subject_df_temp) 
+    
+    # continue scaling
+    subject_df_temp = subject_df_temp %>%
+          apply(1,scale) %>%
+          t() %>%
+          as.data.frame()
+    
+    # reapply colnames
+    colnames(subject_df_temp) = colnames_temp
+    
+    if (i == 1) {
+      subject_df_scaled <- subject_df_temp
+    } else {
+      subject_df_scaled <- bind_cols(subject_df_temp,subject_df_scaled)
+    }
+  }
+  return(subject_df_scaled)
+}
+
+# Note which samples are repeated more than once on each array to ensure scaling is all within-array
+SampleAnnotation$withinArrayScaling = FALSE
+for (i in 1:length(SampleAnnotation$withinArrayScaling)){
+  if (SampleAnnotation$subjectLetter[i]=="A" & SampleAnnotation$array[i]=="205832330169"){
+    SampleAnnotation$withinArrayScaling[i] = TRUE
+  }
+  if (SampleAnnotation$subjectLetter[i]=="B" & SampleAnnotation$array[i]=="205837540011"){
+    SampleAnnotation$withinArrayScaling[i] = TRUE
+  }
+  if (SampleAnnotation$subjectLetter[i]=="C" & SampleAnnotation$array[i]=="205837540013"){
+    SampleAnnotation$withinArrayScaling[i] = TRUE
+  }
+  if (SampleAnnotation$subjectLetter[i]=="D" & SampleAnnotation$array[i]=="205837540026"){
+    SampleAnnotation$withinArrayScaling[i] = TRUE
+  }
+}
+
+samples_to_keep = SampleAnnotation %>%
+  filter(SampleAnnotation$withinArrayScaling==TRUE)
+
+df_normalized_single_array = df_normalized %>%
+  select(samples_to_keep$XChipID)
+
+
+
+df_normalized_s = scale_data_by_grouping_variable(data = df_normalized_single_array, 
+                                                  annotation_df = samples_to_keep,
+                                                  subject_col = "XChipID", 
+                                                  grouping_var = "subjectLetter")
+
+
+```
+
+
+
+
+## Average across 4 subjects
+```{r}
+# pooled samples
+df_normalized_s_pooled = df_normalized_s %>%
+  dplyr::select(samples_to_keep$XChipID[samples_to_keep$pooled==TRUE])
+
+# average_by_subjects_in_pooled_samples
+average_by_subjects_in_pooled_samples = function(df){
+positions = unique(SampleAnnotation$lane)
+for (i in 1:length(positions)){
+  temp = df %>%
+    dplyr::select(samples_to_keep$XChipID[samples_to_keep$pooled==TRUE]) %>%
+    dplyr::select(any_of(samples_to_keep$XChipID[samples_to_keep$lane==positions[i]])) %>% apply(1,mean,na.rm=TRUE)
+  if (i == 1){
+    temp2 = data.frame(CpG = rownames(df),
+                       temp1 = temp)
+  } else {
+    temp2 = cbind(temp2, temp)
+  }
+}
+  return(temp2)
+}
+
+# chamber number means across four subjects
+df_normalized_s_pooled_means = average_by_subjects_in_pooled_samples(df_normalized_s_pooled)
+```
+
+
+Melt columns and add in ID variables
+```{r}
+ids_to_bind = t(samples_to_keep)
+ids_to_bind = data.frame(ids_to_bind)
+colnames(ids_to_bind) = ids_to_bind["XChipID",]
+
+# putting variable info into a single string string (new column name) to preserve while melting
+samples_to_keep$BigName = paste(samples_to_keep$XChipID, 
+                                 samples_to_keep$subjectLetter,
+                                 samples_to_keep$pooled,
+                                 samples_to_keep$grouping_variable_bswa,
+                                 samples_to_keep$grouping_variable,
+                                 samples_to_keep$grouping_variable2,
+                                 samples_to_keep$array,
+                                 samples_to_keep$lane,
+                                 sep = '.')
+
+for (i in 1:length(colnames(df_normalized_s))){
+  j = which(samples_to_keep$XChipID==colnames(df_normalized_s)[i])
+  colnames(df_normalized_s)[i] = samples_to_keep$BigName[j]
+}
+df_normalized_s = reshape2::melt(df_normalized_s)
+
+# Split the variable info back out (delimited by ".")
+split_column_name <- function(df, column_name, delimiter) {
+  col_data <- as.character(df[[column_name]]) # convert column to character type
+  split_data <- strsplit(col_data, delimiter) # split the data by the delimiter
+  split_data <- do.call(rbind, split_data) # convert the list to a matrix
+  df <- cbind(df, split_data) # append split data as new columns
+  return(df)
+}
+
+df_normalized_s_pooled_means = split_column_name(df_normalized_s,"variable","\\.")
+
+
+
+```
+
+```{r}
+# Rename columns
+new_colnames = c("variable","value","XChipID","subject","pooled","grouping_var_bswa","grouping_var","grouping_var2","array","lane")
+colnames(df_normalized_s_pooled_means) = new_colnames
+```
+
+Make plots
+```{r}
+library(ggplot2)
+graph2<- ggplot(df_normalized_s_pooled_means, aes(x = value, fill = lane)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.05, show.legend = FALSE) +
+  theme_bw() +
+  facet_grid( lane ~ . ) +
+  ggtitle("Distribution of centered and scaled beta values in normalized data",
+          "Each subject only in a single array")
+graph2
+
+#ggplotgui::ggplot_shiny(df_normalized_s_pooled_means)
+
+graph <- ggplot(df_normalized_s_pooled_means, aes(x = value)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.05) +
+  facet_grid( lane ~ subject ) +
+  theme_bw()
+graph
+
+```
+
+

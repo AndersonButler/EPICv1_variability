@@ -1,0 +1,416 @@
+---
+title: "age_predictions"
+author: "Anderson Butler"
+date: "2023-04-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(readr)
+# load data
+df_normalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221111_dnamstability_normalizedBetas_sesame_abutler.Rds")
+df_unnormalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221111_dnamstability_unnormalizedBetas_sesame_abutler.Rds")
+df_normalized_with_combat = read_csv("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_fluorescence_values/sesameAndCombat_normalized_betas_for_kras_20230317.csv")
+
+
+df_masking_test = read_csv("df_masking_CV_point75.csv")
+df_masking_test = data.frame(df_masking_test)
+rownames(df_masking_test) = df_masking_test$cpgs
+df_masking_test$cpgs = NULL
+df_masking_test$...1=NULL
+
+df_normalized_with_combat = data.frame(df_normalized_with_combat)
+rownames(df_normalized_with_combat) = df_normalized_with_combat$cpgs # rownames for the csv
+df_normalized_with_combat$cpgs = NULL
+
+df_normalized$X205832330169_R03C01 = NULL #drop outlier
+df_unnormalized$X205832330169_R03C01 = NULL
+df_normalized_with_combat$X205832330169_R03C01 = NULL
+df_masking_test$X205832330169_R03C01 = NULL
+
+# load sample annotation
+SampleAnnotation = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221020_dnamstability_SampleAnnotation_for_ibishof.Rds")
+SampleAnnotation$grouping_variable = as.factor(SampleAnnotation$grouping_variable)
+SampleAnnotation$XChipID
+
+# adding age to SampleAnnotation
+age = c()
+chamber_number = c()
+for (i in 1:length(SampleAnnotation$subjectLetter)){
+  if (SampleAnnotation$subjectLetter[i]=="A") { age[i] = 24 }
+  if (SampleAnnotation$subjectLetter[i]=="B") { age[i] = 39 }
+  if (SampleAnnotation$subjectLetter[i]=="C") { age[i] = 54 }
+  if (SampleAnnotation$subjectLetter[i]=="D") { age[i] = 66 }
+}
+SampleAnnotation$age = age
+
+# Remove rows with nothing but NAs and median impute NA values
+remove_na_median_impute <- function(dataframe){
+  # Remove rows containing more than 10% NAs
+  dataframe <- dataframe[rowSums(is.na(dataframe))/ncol(dataframe) < 0.1,]
+  # Median impute remaining rows
+  for (i in 1:nrow(dataframe)) {
+    dataframe[i, which(is.na(dataframe[i,]))] <- median(as.numeric(dataframe[i,]),na.rm=TRUE)
+  }
+  class(as.numeric(dataframe[i,]))
+  return(dataframe)
+}
+
+df_normalized = remove_na_median_impute(df_normalized)
+df_unnormalized = remove_na_median_impute(df_unnormalized)
+df_normalized_with_combat = remove_na_median_impute(df_normalized_with_combat)
+#df_masking_test = remove_na_median_impute(df_masking_test)
+
+```
+
+From the methylclock vignette at bioconductor:
+
+https://www.bioconductor.org/packages/release/bioc/vignettes/methylclock/inst/doc/methylclock.html#data-nomalization
+
+"By default the package computes the different clocks when there are more than 80% of the required CpGs of each method. Nothing is required when having missing CpGs since the main functions will return NA for those estimators when this criteria is not meet [sic]."
+
+```{r}
+
+
+library(methylclock)
+
+# Include cpgs in df_normalized, methylclock requires these be in the first column
+cpgs = rownames(df_unnormalized)
+df_unnormalized = cbind(cpgs,df_unnormalized)
+
+cpgs = rownames(df_normalized)
+df_normalized = cbind(cpgs,df_normalized)
+
+cpgs = rownames(df_normalized)
+df_normalized_with_combat = cbind(cpgs,df_normalized_with_combat)
+
+cpgs = rownames(df_masking_test)
+df_masking_test = cbind(cpgs,df_masking_test)
+
+# check for missing cpgs
+methylclock::checkClocks(df_unnormalized)
+methylclock::checkClocks(df_normalized)
+methylclock::checkClocks(df_normalized_with_combat)
+methylclock::checkClocks(df_masking_test)
+
+# calculate DNAmAge
+age_unnormalized <- DNAmAge(df_unnormalized)
+age_normalized <- DNAmAge(df_normalized)
+#age_normalized_with_combat <- DNAmAge(df_normalized_with_combat)
+
+# Values out of beta bounds after combat correction. Clipping here:
+clip_dataframe <- function(df) {
+  df[df < 0] <- 0
+  df[df > 1] <- 1
+  return(df)
+}
+
+df_normalized_with_combat = clip_dataframe(df_normalized_with_combat[,2:length(colnames(df_normalized_with_combat))])
+cpgs = rownames(df_normalized)
+df_normalized_with_combat = cbind(cpgs,df_normalized_with_combat)
+
+age_normalized_with_combat <- DNAmAge(df_normalized_with_combat)
+
+df_masking_test = clip_dataframe(df_masking_test[,2:length(colnames(df_masking_test))])
+cpgs = rownames(df_masking_test)
+df_masking_test = cbind(cpgs,df_masking_test)
+age_normalized_with_combat_and_CV75 <- DNAmAge(df_masking_test)
+
+
+```
+
+```{r}
+melted_age_normalized = reshape2::melt(age_normalized,ids = id)
+melted_age_unnormalized = reshape2::melt(age_unnormalized,ids = id)
+melted_normalized_with_combat = reshape2::melt(age_normalized_with_combat,ids = id)
+melted_normalized_with_combat_and_CV75 = reshape2::melt(age_normalized_with_combat_and_CV75,ids = id)
+```
+
+Adding in subject letters
+```{r}
+subject = c()
+chamber_number = c()
+for (i in 1:length(melted_age_normalized$id)){
+  index = which(SampleAnnotation$XChipID==melted_age_normalized$id[i])
+  subject[i] = as.character(SampleAnnotation$subjectLetter[index])
+  chamber_number[i] = as.character(SampleAnnotation$lane[index])
+}
+melted_age_normalized$subject = subject
+
+chamber_number = c()
+subject = c()
+for (i in 1:length(melted_age_unnormalized$id)){
+  index = which(SampleAnnotation$XChipID==melted_age_unnormalized$id[i])
+  subject[i] = as.character(SampleAnnotation$subjectLetter[index])
+  chamber_number[i] = as.character(SampleAnnotation$lane[index])
+}
+melted_age_unnormalized$subject = subject
+
+chamber_number = c()
+subject = c()
+for (i in 1:length(melted_normalized_with_combat$id)){
+  index = which(SampleAnnotation$XChipID==melted_normalized_with_combat$id[i])
+  subject[i] = as.character(SampleAnnotation$subjectLetter[index])
+  chamber_number[i] = as.character(SampleAnnotation$lane[index])
+}
+melted_normalized_with_combat$subject = subject
+
+chamber_number = c()
+subject = c()
+for (i in 1:length(melted_normalized_with_combat_and_CV75$id)){
+  index = which(SampleAnnotation$XChipID==melted_normalized_with_combat_and_CV75$id[i])
+  subject[i] = as.character(SampleAnnotation$subjectLetter[index])
+  chamber_number[i] = as.character(SampleAnnotation$lane[index])
+}
+melted_normalized_with_combat_and_CV75$subject = subject
+
+# get rid of columns that aren't shared
+keep = c("Horvath","Hannum","Levine","skinHorvath","PedBE","Wu","BLUP","EN") # manually identified
+keep = c("Horvath","Hannum","Levine","skinHorvath","BLUP","EN") # manually identified
+
+library(dplyr)
+melted_normalized_with_combat = melted_normalized_with_combat %>%
+  filter(variable %in% keep)
+melted_age_unnormalized = melted_age_unnormalized %>%
+  filter(variable %in% keep)
+melted_age_normalized = melted_age_normalized %>%
+  filter(variable %in% keep)
+melted_normalized_with_combat_and_CV75 = melted_normalized_with_combat_and_CV75 %>%
+  filter(variable %in% keep)
+```
+
+```{r}
+saveRDS(melted_age_normalized,"melted_age_normalized.Rds")
+saveRDS(melted_age_unnormalized,"melted_age_unnormalized.Rds")
+saveRDS(melted_normalized_with_combat,"melted_normalized_with_combat.Rds")
+saveRDS(melted_normalized_with_combat_and_CV75,"melted_normalized_with_combat_and_CV75.Rds")
+```
+
+
+Plots
+```{r}
+
+
+library(ggplot2)
+graph2 <- ggplot(melted_age_normalized, aes(x = subject, y = value, colour = subject)) +
+  facet_grid( . ~ variable ) +
+  geom_point() +
+  theme_bw() + 
+  ggtitle("Age predictions pre-combat")
+graph2
+
+graph1 <- ggplot(melted_age_unnormalized, aes(x = subject, y = value, colour = subject)) +
+  facet_grid( . ~ variable ) + 
+  geom_point() +
+  theme_bw() + 
+  ggtitle("Age predictions raw")
+graph1
+
+graph3 <- ggplot(melted_normalized_with_combat, aes(x = subject, y = value, colour = subject)) +
+  facet_grid( . ~ variable ) +
+  geom_point() +
+  theme_bw() + 
+  ggtitle("Age predictions post-combat")
+graph3
+
+graph4 <- ggplot(melted_normalized_with_combat_and_CV75, aes(x = subject, y = value, colour = subject)) +
+  facet_grid( . ~ variable ) +
+  geom_point() +
+  geom_hline(yintercept = c(24, 39, 54, 66), color = "red") + 
+  theme_bw() + 
+  ggtitle("Age predictions post-combat, CV filtered (<0.75)")
+graph4
+
+```
+
+```{r}
+age_graph_palette = paletteer::paletteer_d("trekcolors::lcars_2375", n = 4)
+
+ages_raw <- ggplot(melted_age_unnormalized, aes(x = subject, y = value, colour = subject)) +
+  paletteer::scale_color_paletteer_d("trekcolors::lcars_2375") + 
+  facet_grid( . ~ variable ) +
+  geom_point(size = 0.25, alpha=0.5) +
+  geom_hline(yintercept = c(24), color = age_graph_palette[1],alpha=0.5) + 
+  geom_hline(yintercept = c(39), color = age_graph_palette[2],alpha=0.5) + 
+  geom_hline(yintercept = c(54), color = age_graph_palette[3],alpha=0.5) + 
+  geom_hline(yintercept = c(66), color = age_graph_palette[4],alpha=0.5) + 
+  theme_bw() + 
+  ggtitle("Raw") +
+  theme(
+    axis.text.x = element_text(angle = 0, 
+                               vjust = 1, 
+                               hjust = 1),
+    text = element_text(family = "Helvetica", 
+                        size = 6), 
+    legend.position = "none",
+    axis.title = element_text(size = 6)
+    )
+ages_raw
+
+ages_sesame <- ggplot(melted_age_normalized, aes(x = subject, y = value, colour = subject)) +
+  paletteer::scale_color_paletteer_d("trekcolors::lcars_2375") + 
+  facet_grid( . ~ variable ) +
+  geom_point(size = 0.25, alpha=0.5) +
+  geom_hline(yintercept = c(24), color = age_graph_palette[1],alpha=0.5) + 
+  geom_hline(yintercept = c(39), color = age_graph_palette[2],alpha=0.5) + 
+  geom_hline(yintercept = c(54), color = age_graph_palette[3],alpha=0.5) + 
+  geom_hline(yintercept = c(66), color = age_graph_palette[4],alpha=0.5) + 
+  theme_bw() + 
+  theme(
+    axis.text.x = element_text(angle = 0, 
+                               vjust = 1, 
+                               hjust = 1),
+    text = element_text(family = "Helvetica", 
+                        size = 6),
+    legend.position = "none",
+    axis.title = element_text(size = 6)
+    ) +
+  ggtitle("SeSAMe")
+ages_raw
+
+ages_combat <- ggplot(melted_normalized_with_combat, aes(x = subject, y = value, colour = subject)) +
+  paletteer::scale_color_paletteer_d("trekcolors::lcars_2375") + 
+  facet_grid( . ~ variable ) +
+  geom_point(size = 0.25, alpha=0.5) +
+  geom_hline(yintercept = c(24), color = age_graph_palette[1],alpha=0.5) + 
+  geom_hline(yintercept = c(39), color = age_graph_palette[2],alpha=0.5) + 
+  geom_hline(yintercept = c(54), color = age_graph_palette[3],alpha=0.5) + 
+  geom_hline(yintercept = c(66), color = age_graph_palette[4],alpha=0.5) + 
+  theme_bw() + 
+  theme(
+    axis.text.x = element_text(angle = 0, 
+                               vjust = 1, 
+                               hjust = 1),
+    text = element_text(family = "Helvetica", 
+                        size = 6),
+    legend.position = "none",
+    axis.title = element_text(size = 6)
+    ) +
+  ggtitle("SeSAMe + ComBat")
+ages_combat
+
+```
+
+
+
+
+
+```{r}
+# # save_pdfs
+# pdf("/home/sagemaker-user/dnamstability/dnamstability-abutler/pdf_plots/Fig7A_age_predictions_unnormalized.pdf",width = 6, height = 3,pointsize=10)
+# graph1
+# dev.off()
+# 
+# pdf("/home/sagemaker-user/dnamstability/dnamstability-abutler/pdf_plots/Fig7A_age_predictions_normalized.pdf",width = 6, height = 3,pointsize=10)
+# graph2
+# dev.off()
+# 
+# pdf("/home/sagemaker-user/dnamstability/dnamstability-abutler/pdf_plots/Fig7A_age_predictions_normalized_with_combat.pdf",width = 6, height = 3,pointsize=10)
+# graph3
+# dev.off()
+```
+
+
+# chamber number association with epigenetic age residual
+```{r}
+# wrangling columns
+age_normalized = data.frame(age_normalized)
+rownames(age_normalized) = age_normalized$id
+age_normalized$id = NULL
+age_normalized$BNN = NULL
+age_normalized$TL = NULL
+
+# calculate residuals
+age_normalized_residuals = apply(age_normalized, 2, function(x) x - SampleAnnotation$age)
+age_normalized_residuals = data.frame(age_normalized_residuals)
+age_normalized_residuals$id = rownames(age_normalized)
+melted_age_normalized_residuals = reshape2::melt(age_normalized_residuals,ids = id)
+
+# adding chamber number
+subject = c()
+chamber_number = c()
+for (i in 1:length(melted_age_normalized_residuals$id)){
+  index = which(SampleAnnotation$XChipID==melted_age_normalized_residuals$id[i])
+  subject[i] = as.character(SampleAnnotation$subjectLetter[index])
+  chamber_number[i] = as.character(SampleAnnotation$lane[index])
+}
+melted_age_normalized_residuals$chamber_number = chamber_number
+melted_age_normalized_residuals$subject = subject
+
+graph <- ggplot(melted_age_normalized_residuals, aes(x = chamber_number, y = value, colour = chamber_number)) +
+  geom_point(stat = 'summary', fun.y = 'mean') +
+  geom_errorbar(stat = 'summary', fun.data = 'mean_se', 
+                width=0, fun.args = list(mult = 1.96)) +
+  facet_grid( subject ~ variable ) +
+  labs(x = 'label x-axis', y = 'Age prediction residuals')+
+  scale_colour_brewer(palette = 'Set2') +
+  ggtitle("Chamber Number vs Age Prediction residuals") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+
+#age_unnormalized_residuals = apply(age_unnormalized, 2, function(x) x - SampleAnnotation$age)
+
+graph = ggplot(melted_age_normalized_residuals, aes(x = chamber_number, y = value, colour = chamber_number)) +
+  geom_point(stat = 'summary_bin',fun.data = 'mean_se') +
+  geom_errorbar(stat = 'summary_bin', fun.data = 'mean_se', 
+                width = 0, fun.args = list(mult = 1.96)) +
+  facet_grid(subject ~ variable) +
+  labs(x = 'label x-axis', y = 'Age prediction residuals') +
+  scale_colour_brewer(palette = 'Set2') +
+  ggtitle("Chamber Number vs Age Prediction residuals") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+graph
+
+graph = ggplot(melted_age_normalized_residuals, aes(x = chamber_number, y = value, colour = chamber_number)) +
+  geom_point(stat = 'summary_bin',fun.data = 'mean_se') +
+  geom_errorbar(stat = 'summary_bin', fun.data = 'mean_se', 
+                width = 0, fun.args = list(mult = 1.96)) +
+  facet_grid(subject ~ variable) +
+  labs(x = 'label x-axis', y = 'Age prediction residuals') +
+  scale_colour_brewer(palette = 'Set2') +
+  ggtitle("Chamber Number vs Age Prediction residuals") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+graph
+
+
+# Preprocess the data to calculate mean and standard deviation
+summary_data <- melted_age_normalized_residuals %>%
+  group_by(chamber_number, variable) %>%
+  summarize(mean_value = mean(value), sd_value = sd(value))
+
+
+# Create the graph using the summary data
+ggplotgui::ggplot_shiny(summary_data)
+```
+
+## looking at this a different way with linear mixed effect models
+```{r}
+library(lme4)
+model <- lmer(value ~ variable + chamber_number + (1|subject), data = melted_age_normalized_residuals)
+anova_results_temp = car::Anova(model, test = "F")
+```
+
+# chamber number vs age prediction & residual variability
+
+```{r}
+library(dplyr)
+test = age_normalized %>%
+  
+```
+
+
+

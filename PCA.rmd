@@ -1,0 +1,613 @@
+---
+title: "clustering"
+author: "Anderson Butler"
+date: "2023-04-25"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)   # for data manipulation
+library(ggplot2) # for data visualization
+library(pheatmap)# for creating heatmaps
+library(tsne)    # for performing t-SNE
+
+pdf_export_directory = '~/dnamstability/dnamstability-abutler/pdf_plots/' #where I'm saving figures
+```
+
+```{r}
+library(readr)
+library(paletteer)
+df_normalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221111_dnamstability_normalizedBetas_sesame_abutler.Rds")
+df_unnormalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221111_dnamstability_unnormalizedBetas_sesame_abutler.Rds")
+df_normalized_with_combat = read_csv("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_fluorescence_values/sesameAndCombat_normalized_betas_for_kras_20230317.csv")
+
+df_normalized_with_combat = data.frame(df_normalized_with_combat)
+rownames(df_normalized_with_combat) = df_normalized_with_combat$cpgs # rownames for the csv
+df_normalized_with_combat$cpgs = NULL
+
+df_normalized_combat_array = read_csv("sesameAndCombat_normalized_betas_array_20230426.csv")
+df_normalized_combat_array = data.frame(df_normalized_combat_array)
+rownames(df_normalized_combat_array) = df_normalized_combat_array$cpgs # rownames for the csv
+df_normalized_combat_array$cpgs = NULL
+
+
+df_normalized$X205832330169_R03C01 = NULL #drop outlier
+df_unnormalized$X205832330169_R03C01 = NULL
+df_normalized_with_combat$X205832330169_R03C01 = NULL
+#df_masking_test$X205832330169_R03C01 = NULL
+
+# load sample annotation
+SampleAnnotation = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221020_dnamstability_SampleAnnotation_for_ibishof.Rds")
+SampleAnnotation$grouping_variable = as.factor(SampleAnnotation$grouping_variable)
+SampleAnnotation$XChipID
+
+# Remove rows with nothing but NAs and median impute NA values
+remove_na_median_impute <- function(dataframe){
+  # Remove rows containing more than 10% NAs
+  dataframe <- dataframe[rowSums(is.na(dataframe))/ncol(dataframe) < 0.1,]
+  # Median impute remaining rows
+  for (i in 1:nrow(dataframe)) {
+    dataframe[i, which(is.na(dataframe[i,]))] <- median(as.numeric(dataframe[i,]),na.rm=TRUE)
+  }
+  class(as.numeric(dataframe[i,]))
+  return(dataframe)
+}
+
+df_normalized = remove_na_median_impute(df_normalized)
+df_unnormalized = remove_na_median_impute(df_unnormalized)
+df_normalized_with_combat = remove_na_median_impute(df_normalized_with_combat)
+
+
+# putting variable info into a single string string (new column name) to preserve while doing PCA
+SampleAnnotation$BigName = paste(SampleAnnotation$XChipID, 
+                                 SampleAnnotation$subjectLetter,
+                                 SampleAnnotation$pooled,
+                                 SampleAnnotation$grouping_variable_bswa,
+                                 SampleAnnotation$grouping_variable,
+                                 SampleAnnotation$grouping_variable2,
+                                 SampleAnnotation$array,
+                                 SampleAnnotation$lane,
+                                 sep = '.')
+```
+
+```{r}
+# Load required packages
+library(dplyr)
+library(factoextra)
+
+# Perform PCA on the dataframe
+df_pca <- df_normalized %>% 
+  t() %>%
+  prcomp(scale. = TRUE)
+
+# Extract the first 50 principal components
+df_pca_scores <- as.data.frame(df_pca$x[, 1:50])
+
+# Calculate the distance matrix using Euclidean distance
+dist_matrix <- dist(df_pca_scores, method = "euclidean")
+
+# Perform hierarchical clustering using Ward's method
+hc <- hclust(dist_matrix, method = "ward.D2")
+
+# Plot the dendrogram
+plot(hc, hang = -1)
+hc2 = hc
+new_subject_labels =c()
+for (i in 1:length(hc$labels)){
+  new_subject_labels[i] = SampleAnnotation$aliquot[SampleAnnotation$XChipID==hc$labels[i]]
+}
+hc2$labels = new_subject_labels
+plot(hc2, hang = -1)
+
+### Plotting
+pdf(file = paste0(pdf_export_directory, "SeSAMe_hclust.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+plot(hc2, hang = -1)
+dev.off()
+###
+
+df_pca_scores2 = df_pca_scores
+df_pca_scores2 = cbind(df_pca_scores2,SampleAnnotation)
+
+# The code below will generate the graph:
+graph1 <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = subject)) +
+  geom_point() +
+  ggtitle('Principle components before combat correction') +
+  theme_bw()
+graph1
+
+### Plotting
+pdf(file = paste0(pdf_export_directory, "pca_SeSAMe_bySubject"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph1
+dev.off()
+###
+
+
+library(paletteer)
+graph2 <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = lane)) +
+  geom_point() +
+  ggtitle('PCA before combat correction') +
+  scale_color_paletteer_d("trekcolors::andorian")+
+  theme_bw()
+graph2
+
+### Plotting
+pdf(file = paste0(pdf_export_directory, "pca_SeSAMe_byChamberNumber.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph2
+dev.off()
+###
+
+graph3 <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = array)) +
+  scale_color_paletteer_d("trekcolors::terran")+
+  geom_point() +
+  ggtitle('PCA before combat correction') +
+  theme_bw()
+graph3
+### Plotting
+pdf(file = paste0(pdf_export_directory, "pca_SeSAMe_byArray.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph3
+dev.off()
+###
+
+#ggplotgui::ggplot_shiny(df_pca_scores2)
+```
+Saving pdf plots of the figures above
+```{r}
+
+
+
+
+```
+
+
+
+
+```{r}
+# Load required packages
+library(dplyr)
+library(factoextra)
+
+# Perform PCA on the dataframe
+df_pca <- df_normalized_with_combat %>% 
+  t() %>%
+  prcomp(scale. = TRUE)
+
+# Extract the first 100 principal components
+df_pca_scores <- as.data.frame(df_pca$x[, 1:50])
+
+# Calculate the distance matrix using Euclidean distance
+dist_matrix <- dist(df_pca_scores, method = "euclidean")
+
+# Perform hierarchical clustering using Ward's method
+hc3 <- hclust(dist_matrix, method = "ward.D2")
+
+# Plot the dendrogram
+#plot(hc3)
+hc4 = hc3
+new_subject_labels =c()
+for (i in 1:length(hc$labels)){
+  new_subject_labels[i] = SampleAnnotation$aliquot[SampleAnnotation$XChipID==hc$labels[i]]
+}
+hc4$labels = new_subject_labels
+plot(hc4,hang = -1)
+
+pdf(file = paste0(pdf_export_directory, "hclust_SeSAMeComBat_bySubject.pdf"),   # The directory you want to save the file in
+    width = 3, # The width of the plot in inches
+    height = 6) # The height of the plot in inches
+plot(hc4,hang = -1)
+dev.off()
+
+df_pca_scores2 = df_pca_scores
+df_pca_scores2 = cbind(df_pca_scores2,SampleAnnotation)
+
+# The code below will generate the graph:
+graph <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = subject)) +
+  geom_point() +
+  ggtitle('Principle components after combat correction') +
+  theme_bw()
+graph
+
+pdf(file = paste0(pdf_export_directory, "pca_SeSAMeComBat_bySubject.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph
+dev.off()
+
+
+graph <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = lane)) +
+  geom_point() +
+  ggtitle('Principle components after combat correction') +
+  scale_color_paletteer_d("trekcolors::andorian")+
+  theme_bw()
+graph
+
+pdf(file = paste0(pdf_export_directory, "pca_SeSAMeComBat_byChambernumber.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph
+dev.off()
+
+graph <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = array)) +
+  geom_point() +
+  ggtitle('Principle components after combat correction') +
+  scale_color_paletteer_d("trekcolors::terran")+
+  theme_bw()
+graph
+
+pdf(file = paste0(pdf_export_directory, "pca_SeSAMeComBat_byArray.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph
+dev.off()
+
+```
+
+```{r}
+# Load required packages
+library(dplyr)
+library(factoextra)
+
+# Perform PCA on the dataframe
+df_pca <- df_normalized_combat_array %>% 
+  t() %>%
+  prcomp(scale. = TRUE)
+
+# Extract the first 100 principal components
+df_pca_scores <- as.data.frame(df_pca$x[, 1:50])
+
+# Calculate the distance matrix using Euclidean distance
+dist_matrix <- dist(df_pca_scores, method = "euclidean")
+
+# Perform hierarchical clustering using Ward's method
+hc3 <- hclust(dist_matrix, method = "ward.D2")
+
+# Plot the dendrogram
+#plot(hc3)
+hc4 = hc3
+new_subject_labels =c()
+for (i in 1:length(hc4$labels)){
+  new_subject_labels[i] = SampleAnnotation$aliquot[SampleAnnotation$XChipID==hc4$labels[i]]
+}
+hc4$labels = new_subject_labels
+plot(hc4,hang = -1)
+
+pdf(file = paste0(pdf_export_directory, "hclust_ComBatArray.pdf"),   # The directory you want to save the file in
+    width = 6, # The width of the plot in inches
+    height = 3) # The height of the plot in inches
+plot(hc4,hang = -1)
+dev.off()
+
+df_pca_scores2 = df_pca_scores
+df_pca_scores2 = cbind(df_pca_scores2,SampleAnnotation)
+
+# The code below will generate the graph:
+graph <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = subject)) +
+  geom_point() +
+  ggtitle('Principle components after combat correction (batch = array)') +
+  theme_bw()
+graph
+
+pdf(file = paste0(pdf_export_directory, "pca_ComBatArray_bySubject.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph
+dev.off()
+
+graph <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = lane)) +
+  geom_point() +
+  ggtitle('Principle components after combat correction (batch = array)') +
+  scale_color_paletteer_d("trekcolors::andorian")+
+  theme_bw()
+graph
+
+pdf(file = paste0(pdf_export_directory, "pca_ComBatArray_byChamberNumber.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph
+dev.off()
+
+graph <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = array)) +
+  geom_point() +
+  ggtitle('Principle components after combat correction (batch = array)') +
+  scale_color_paletteer_d("trekcolors::terran")+
+  theme_bw()
+graph
+
+pdf(file = paste0(pdf_export_directory, "pca_ComBatArray_byArray.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph
+dev.off()
+```
+# pbrierley asking about what combat without sesame would look like.
+```{r}
+df_unnormalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221111_dnamstability_unnormalizedBetas_sesame_abutler.Rds")
+
+df_unnormalized$X205832330169_R03C01 = NULL
+
+# load sample annotation
+SampleAnnotation = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221020_dnamstability_SampleAnnotation_for_ibishof.Rds")
+SampleAnnotation$grouping_variable = as.factor(SampleAnnotation$grouping_variable)
+SampleAnnotation$XChipID
+
+# Remove rows with nothing but NAs and median impute NA values
+remove_na_median_impute <- function(dataframe){
+  # Remove rows containing more than 10% NAs
+  dataframe <- dataframe[rowSums(is.na(dataframe))/ncol(dataframe) < 0.1,]
+  # Median impute remaining rows
+  for (i in 1:nrow(dataframe)) {
+    dataframe[i, which(is.na(dataframe[i,]))] <- median(as.numeric(dataframe[i,]),na.rm=TRUE)
+  }
+  class(as.numeric(dataframe[i,]))
+  return(dataframe)
+}
+
+df_unnormalized = remove_na_median_impute(df_unnormalized)
+
+# putting variable info into a single string string (new column name) to preserve while doing PCA
+SampleAnnotation$BigName = paste(SampleAnnotation$XChipID, 
+                                 SampleAnnotation$subjectLetter,
+                                 SampleAnnotation$pooled,
+                                 SampleAnnotation$grouping_variable_bswa,
+                                 SampleAnnotation$grouping_variable,
+                                 SampleAnnotation$grouping_variable2,
+                                 SampleAnnotation$array,
+                                 SampleAnnotation$lane,
+                                 sep = '.')
+
+```
+
+```{r}
+library(sva)
+pheno = SampleAnnotation
+modcombat=model.matrix(~1,data=pheno)
+batch = pheno$lane
+
+ComBat_betas = ComBat(df_unnormalized,
+                      batch = batch,
+                      mod = modcombat,
+                      par.prior = TRUE,
+                      prior.plots = TRUE)
+
+ComBat_betas_df = data.frame(ComBat_betas)
+saveRDS(ComBat_betas_df,"v1_sesameNoPrep_betas_ComBat.Rds")
+```
+
+```{r}
+pdf_export_directory = '~/dnamstability/dnamstability-abutler/pdf_plots/' #where I'm saving figures
+
+# Load required packages
+library(dplyr)
+library(factoextra)
+library(paletteer)
+ComBat_betas_df = data.frame(ComBat_betas_df)
+
+test = apply(ComBat_betas_df,1,var)
+
+# Perform PCA on the dataframe
+df_pca <- ComBat_betas_df %>% 
+  filter(apply(., 1, var) != 0) %>% # some zero-variance rows
+  t() %>%
+  prcomp(scale. = TRUE)
+
+# Extract the first 100 principal components
+df_pca_scores <- as.data.frame(df_pca$x[, 1:50])
+
+# Calculate the distance matrix using Euclidean distance
+dist_matrix <- dist(df_pca_scores, method = "euclidean")
+
+# Perform hierarchical clustering using Ward's method
+hc3 <- hclust(dist_matrix, method = "ward.D2")
+
+# Plot the dendrogram
+#plot(hc3)
+hc4 = hc3
+new_subject_labels =c()
+for (i in 1:length(hc4$labels)){
+  new_subject_labels[i] = SampleAnnotation$aliquot[SampleAnnotation$XChipID==hc4$labels[i]]
+}
+hc4$labels = new_subject_labels
+plot(hc4,hang = -1)
+
+pdf(file = paste0(pdf_export_directory, "hclust_ComBatNoPrep.pdf"),   # The directory you want to save the file in
+    width = 6, # The width of the plot in inches
+    height = 3) # The height of the plot in inches
+plot(hc4,hang = -1)
+dev.off()
+
+df_pca_scores2 = df_pca_scores
+df_pca_scores2 = cbind(df_pca_scores2,SampleAnnotation)
+
+# The code below will generate the graph:
+graph <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = subject)) +
+  geom_point() +
+  ggtitle('Principle components after combat correction (Raw)') +
+  theme_bw()
+graph
+
+pdf(file = paste0(pdf_export_directory, "pca_ComBatNoPrep_bySubject.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph
+dev.off()
+
+graph <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = lane)) +
+  geom_point() +
+  ggtitle('Principle components after combat correction (Raw)') +
+  scale_color_paletteer_d("trekcolors::andorian")+
+  theme_bw()
+graph
+
+pdf(file = paste0(pdf_export_directory, "pca_ComBatNoPrep_byChamberNumber.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph
+dev.off()
+
+graph <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = array)) +
+  geom_point() +
+  ggtitle('Principle components after combat correction (Raw)') +
+  scale_color_paletteer_d("trekcolors::terran")+
+  theme_bw()
+graph
+
+pdf(file = paste0(pdf_export_directory, "pca_ComBatNoPrep_byArray.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph
+dev.off()
+```
+
+
+# me being insecure and wanting to make sure that everything is reproducible
+```{r}
+df_normalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221111_dnamstability_normalizedBetas_sesame_abutler.Rds")
+
+df_normalized$X205832330169_R03C01 = NULL
+
+# load sample annotation
+SampleAnnotation = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221020_dnamstability_SampleAnnotation_for_ibishof.Rds")
+SampleAnnotation$grouping_variable = as.factor(SampleAnnotation$grouping_variable)
+SampleAnnotation$XChipID
+
+# Remove rows with nothing but NAs and median impute NA values
+remove_na_median_impute <- function(dataframe){
+  # Remove rows containing more than 10% NAs
+  dataframe <- dataframe[rowSums(is.na(dataframe))/ncol(dataframe) < 0.1,]
+  # Median impute remaining rows
+  for (i in 1:nrow(dataframe)) {
+    dataframe[i, which(is.na(dataframe[i,]))] <- median(as.numeric(dataframe[i,]),na.rm=TRUE)
+  }
+  class(as.numeric(dataframe[i,]))
+  return(dataframe)
+}
+
+df_normalized = remove_na_median_impute(df_normalized)
+
+# putting variable info into a single string string (new column name) to preserve while doing PCA
+SampleAnnotation$BigName = paste(SampleAnnotation$XChipID, 
+                                 SampleAnnotation$subjectLetter,
+                                 SampleAnnotation$pooled,
+                                 SampleAnnotation$grouping_variable_bswa,
+                                 SampleAnnotation$grouping_variable,
+                                 SampleAnnotation$grouping_variable2,
+                                 SampleAnnotation$array,
+                                 SampleAnnotation$lane,
+                                 sep = '.')
+
+```
+
+```{r}
+library(sva)
+pheno = SampleAnnotation
+modcombat=model.matrix(~1,data=pheno)
+batch = pheno$lane
+
+ComBat_betas = ComBat(df_normalized,
+                      batch = batch,
+                      mod = modcombat,
+                      par.prior = TRUE,
+                      prior.plots = TRUE)
+
+ComBat_betas_df = data.frame(ComBat_betas)
+saveRDS(ComBat_betas_df,"v1_sesameCombat_betas_ComBat.Rds")
+```
+
+```{r}
+pdf_export_directory = '~/dnamstability/dnamstability-abutler/pdf_plots/' #where I'm saving figures
+
+# Load required packages
+library(dplyr)
+library(factoextra)
+library(paletteer)
+ComBat_betas_df = data.frame(ComBat_betas_df)
+
+test = apply(ComBat_betas_df,1,var)
+
+# Perform PCA on the dataframe
+df_pca <- ComBat_betas_df %>% 
+  filter(apply(., 1, var) != 0) %>% # some zero-variance rows
+  t() %>%
+  prcomp(scale. = TRUE)
+
+# Extract the first 100 principal components
+df_pca_scores <- as.data.frame(df_pca$x[, 1:50])
+
+# Calculate the distance matrix using Euclidean distance
+dist_matrix <- dist(df_pca_scores, method = "euclidean")
+
+# Perform hierarchical clustering using Ward's method
+hc3 <- hclust(dist_matrix, method = "ward.D2")
+
+# Plot the dendrogram
+#plot(hc3)
+hc4 = hc3
+new_subject_labels =c()
+for (i in 1:length(hc4$labels)){
+  new_subject_labels[i] = SampleAnnotation$aliquot[SampleAnnotation$XChipID==hc4$labels[i]]
+}
+hc4$labels = new_subject_labels
+plot(hc4,hang = -1)
+
+pdf(file = paste0(pdf_export_directory, "hclust_ComBatDoublecheck.pdf"),   # The directory you want to save the file in
+    width = 6, # The width of the plot in inches
+    height = 3) # The height of the plot in inches
+plot(hc4,hang = -1)
+dev.off()
+
+df_pca_scores2 = df_pca_scores
+df_pca_scores2 = cbind(df_pca_scores2,SampleAnnotation)
+
+# The code below will generate the graph:
+graph <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = subject)) +
+  geom_point() +
+  ggtitle('Principle components after combat correction (Sesame + ComBat)') +
+  theme_bw()
+graph
+
+pdf(file = paste0(pdf_export_directory, "pca_ComBatDoublecheck_bySubject.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph
+dev.off()
+
+graph <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = lane)) +
+  geom_point() +
+  ggtitle('Principle components after combat correction (Sesame + ComBat)') +
+  scale_color_paletteer_d("trekcolors::andorian")+
+  theme_bw()
+graph
+
+pdf(file = paste0(pdf_export_directory, "pca_ComBatDoublecheck_byChamberNumber.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph
+dev.off()
+
+graph <- ggplot(df_pca_scores2, aes(x = PC1, y = PC2, colour = array)) +
+  geom_point() +
+  ggtitle('Principle components after combat correction (Sesame + ComBat)') +
+  scale_color_paletteer_d("trekcolors::terran")+
+  theme_bw()
+graph
+
+pdf(file = paste0(pdf_export_directory, "pca_ComBatDoublecheck_byArray.pdf"),   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+graph
+dev.off()
+```
+

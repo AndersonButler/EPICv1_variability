@@ -1,0 +1,371 @@
+---
+title: "anova_results_visualized"
+author: "Anderson Butler"
+date: "2023-04-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# load anova results
+anova_results_df_normalized2 = readRDS("anova_results_df_normalized2.Rds") # from sesame normalized
+
+
+df_normalized = readRDS("df_normalized_RemNAmedianImpute070122023.Rds") # used to pull rownames below
+
+library(ggplot2)
+library(readr)
+```
+
+# graph from sesame normalized
+```{r}
+array_values <- vector()
+chamber_number_values <- vector()
+
+# The %% operator computes the modulo of the current index i divided by 4. If the modulo is equal to 1, the code inside the if statement is executed. In other words, the code inside the if statement is executed every fourth iteration of the loop, starting from the first iteration (when i = 1).
+
+# Ultimately, the code inside the if statement is executed on the first, fifth, and ninth iterations of the loop. The output might look something like this:
+
+# Loop through the indices of the list and extract every fourth element
+for (i in seq_along(anova_results_df_normalized2)) {
+  if (i %% 4 == 1) {
+    # Check if the vector has at least two elements before extracting them
+    if (length(anova_results_df_normalized2[[i]]) >= 2) {
+      array_values <- c(array_values, anova_results_df_normalized2[[i]][1])
+      chamber_number_values <- c(chamber_number_values, anova_results_df_normalized2[[i]][2])
+    } else {
+      array_values <- c(array_values, NA)
+      chamber_number_values <- c(chamber_number_values, NA)
+    }
+  }
+}
+
+array_values_df = data.frame(cpg = rownames(df_normalized),
+                             array_values = array_values,
+                             chamber_number_values = chamber_number_values)
+
+write_csv(array_values_df,"array_values_df_sesame.csv")
+
+#ggplotgui::ggplot_shiny(array_values_df_melted)
+
+array_values_df_melted = reshape2::melt(array_values_df,ids = cpg)
+df = array_values_df_melted
+library(ggplot2)
+library(paletteer)
+graph <- ggplot(df, aes(x = variable, y = value)) +
+  #geom_boxplot(notch = FALSE, outlier.shape = NA) + # hide outlier points
+  geom_boxplot(notch = FALSE) + # don't hide outlier points
+  theme_bw() +
+  ggtitle("F statistics from linear mixed effects models") + 
+  scale_y_log10() # put y-axis on a log scale 
+graph
+```
+making PDF figures
+```{r}
+array_values_df = read_csv("array_values_df_sesame.csv")
+array_values_df_melted = reshape2::melt(array_values_df,ids = cpg)
+library(ggplot2)
+graph <- ggplot(array_values_df_melted, aes(x = variable, y = value)) +
+  #geom_boxplot(notch = FALSE, outlier.shape = NA) + # hide outlier points
+  geom_boxplot(notch = FALSE,lwd=0.25,outlier.size=0.25,outlier.stroke = 0.25) + # don't hide outlier points
+  theme_bw() +
+  ggtitle("Fstats lme - sesame") + 
+  scale_y_log10() # put y-axis on a log scale 
+graph
+
+### Plotting
+pdf_export_directory = '~/dnamstability/dnamstability-abutler/pdf_plots/' #where I'm saving figures
+pdf(file = paste0(pdf_export_directory, "lme_arrayVSchamber_sesame.pdf"),   # The directory you want to save the file in
+    width = (30/25.4), # The width of the plot in inches
+    height = (40/25.4)) # The height of the plot in inches
+graph
+dev.off()
+###
+```
+
+
+
+# how many are statistically significant?
+```{r}
+array_p_values <- vector()
+chamber_number_p_values <- vector()
+
+# Loop through the indices of the list and extract every fourth element
+for (i in seq_along(anova_results_df_normalized2)) {
+  if (i %% 4 == 0) {
+    # Check if the vector has at least two elements before extracting them
+    if (length(anova_results_df_normalized2[[i]]) >= 2) {
+      array_p_values <- c(array_p_values, anova_results_df_normalized2[[i]][1])
+      chamber_number_p_values <- c(chamber_number_p_values, anova_results_df_normalized2[[i]][2])
+    } else {
+      array_p_values <- c(array_p_values, NA)
+      chamber_number_p_values <- c(chamber_number_p_values, NA)
+    }
+  }
+}
+
+array_pvalues_df = data.frame(cpg = rownames(df_normalized),
+                             array_p_values = array_p_values,
+                             chamber_number_p_values = chamber_number_p_values)
+
+array_pvalues_df_melted = reshape2::melt(array_pvalues_df,ids = cpg)
+
+ggplotgui::ggplot_shiny(array_pvalues_df_melted)
+```
+
+
+```{r}
+
+```
+
+
+
+# graph from sesame normalized + combat
+```{r}
+array_values <- vector()
+chamber_number_values <- vector()
+
+anova_results_df_normalized_with_combat2 = readRDS("anova_results_df_normalized_with_combat2.Rds")
+# Loop through the indices of the list and extract every fourth element
+for (i in seq_along(anova_results_df_normalized_with_combat2)) {
+  if (i %% 4 == 1) {
+    # Check if the vector has at least two elements before extracting them
+    if (length(anova_results_df_normalized_with_combat2[[i]]) >= 2) {
+      array_values <- c(array_values, anova_results_df_normalized_with_combat2[[i]][1])
+      chamber_number_values <- c(chamber_number_values, anova_results_df_normalized_with_combat2[[i]][2])
+    } else {
+      array_values <- c(array_values, NA)
+      chamber_number_values <- c(chamber_number_values, NA)
+    }
+  }
+}
+
+array_values_df = data.frame(cpg = rownames(df_normalized),
+                             array_values = array_values,
+                             chamber_number_values = chamber_number_values)
+
+write_csv(array_values_df,"array_values_df_sesameCombatChamberNumber.csv")
+
+ggplotgui::ggplot_shiny(array_values_df_melted)
+
+array_values_df_melted = reshape2::melt(array_values_df,ids = cpg)
+df = array_values_df_melted
+library(ggplot2)
+graph <- ggplot(df, aes(x = variable, y = value, colour = variable)) +
+  geom_boxplot(notch = FALSE) + # hide outlier points
+  theme_bw() +
+  ggtitle("F statistics from linear mixed effects models - sesame + combat") + 
+  scale_y_log10() # put y-axis on a log scale 
+graph
+```
+
+```{r}
+array_values_df = read_csv("array_values_df_sesameCombatChamberNumber.csv")
+array_values_df_melted = reshape2::melt(array_values_df,ids = cpg)
+library(ggplot2)
+graph <- ggplot(array_values_df_melted, aes(x = variable, y = value)) +
+  #geom_boxplot(notch = FALSE, outlier.shape = NA) + # hide outlier points
+  geom_boxplot(notch = FALSE,lwd=0.25,outlier.size=0.25,outlier.stroke = 0.25) + # don't hide outlier points
+  theme_bw() +
+  theme(text = element_text(family = "Helvetica", size = 5),
+  axis.title = element_text(size = 5))+
+  ggtitle("Fstats lme - sesame") + 
+  scale_y_log10() # put y-axis on a log scale 
+graph
+
+### Plotting
+pdf_export_directory = '~/dnamstability/dnamstability-abutler/pdf_plots/' #where I'm saving figures
+pdf(file = paste0(pdf_export_directory, "lme_arrayVSchamber_sesameCombatChamberNubmer.pdf"),   # The directory you want to save the file in
+    width = (30/25.4), # The width of the plot in inches
+    height = (40/25.4)) # The height of the plot in inches
+graph
+dev.off()
+###
+```
+
+
+
+# graph from unnormalized
+```{r}
+array_values <- vector()
+chamber_number_values <- vector()
+anova_results_df_unnormalized = readRDS("anova_results_df_unnormalized10022023.Rds")
+
+# Loop through the indices of the list and extract every fourth element
+for (i in seq_along(anova_results_df_unnormalized)) {
+  if (i %% 4 == 1) {
+    # Check if the vector has at least two elements before extracting them
+    if (length(anova_results_df_unnormalized[[i]]) >= 2) {
+      array_values <- c(array_values, anova_results_df_unnormalized[[i]][1])
+      chamber_number_values <- c(chamber_number_values, anova_results_df_unnormalized[[i]][2])
+    } else {
+      array_values <- c(array_values, NA)
+      chamber_number_values <- c(chamber_number_values, NA)
+    }
+  }
+}
+
+df_unnormalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221111_dnamstability_unnormalizedBetas_sesame_abutler.Rds")
+
+equal_rows <- apply(df_unnormalized, 1, function(row) all(row == row[1],na.rm = TRUE))
+library(dplyr)
+df_unnormalized = df_unnormalized %>%
+  mutate(ZeroVar = equal_rows) %>%
+  filter(ZeroVar == FALSE) %>% 
+  mutate(ZeroVar = NULL)
+
+
+array_values_df = data.frame(cpg = rownames(df_unnormalized),
+                             array_values = array_values,
+                             chamber_number_values = chamber_number_values)
+
+library(readr)
+write_csv(array_values_df,"array_values_df_unnormalized.csv")
+
+#ggplotgui::ggplot_shiny(array_values_df_melted)
+
+array_values_df_melted = reshape2::melt(array_values_df,ids = cpg)
+df = array_values_df_melted
+library(ggplot2)
+graph <- ggplot(df, aes(x = variable, y = value, colour = variable)) +
+  geom_boxplot(notch = FALSE) + # hide outlier points
+  theme_bw() +
+  ggtitle("F statistics from linear mixed effects models - raw") + 
+  scale_y_log10() # put y-axis on a log scale 
+graph
+
+write_csv(array_values_df,"array_values_df_raw.csv")
+
+
+
+
+
+### Plotting
+pdf_export_directory = '~/dnamstability/dnamstability-abutler/pdf_plots/' #where I'm saving figures
+pdf(file = paste0(pdf_export_directory, "lme_arrayVSchamber_sesameRaw_test.pdf"),   # The directory you want to save the file in
+    width = (30/25.4), # The width of the plot in inches (converted from mm)
+    height = 40/25.4) # The height of the plot in inches
+graph
+dev.off()
+###
+```
+
+
+
+
+
+# graph from sesame normalized + combat (batch = array)
+```{r}
+array_values <- vector()
+chamber_number_values <- vector()
+anova_results_df_normalized_with_combat_array = readRDS("anova_results_df_normalized_with_combat_array2.Rds")
+
+# Loop through the indices of the list and extract every fourth element
+for (i in seq_along(anova_results_df_normalized_with_combat_array)) {
+  if (i %% 4 == 1) {
+    # Check if the vector has at least two elements before extracting them
+    if (length(anova_results_df_normalized_with_combat_array[[i]]) >= 2) {
+      array_values <- c(array_values, anova_results_df_normalized_with_combat_array[[i]][1])
+      chamber_number_values <- c(chamber_number_values, anova_results_df_normalized_with_combat_array[[i]][2])
+    } else {
+      array_values <- c(array_values, NA)
+      chamber_number_values <- c(chamber_number_values, NA)
+    }
+  }
+}
+
+array_values_df = data.frame(cpg = rownames(df_normalized),
+                             array_values = array_values,
+                             chamber_number_values = chamber_number_values)
+
+write_csv(array_values_df,"array_values_df_combat_array.csv")
+
+#ggplotgui::ggplot_shiny(array_values_df_melted)
+
+array_values_df_melted = reshape2::melt(array_values_df,ids = cpg)
+df = array_values_df_melted
+library(ggplot2)
+graph <- ggplot(df, aes(x = variable, y = value, colour = variable)) +
+  geom_boxplot(notch = FALSE) + # hide outlier points
+  theme_bw() +
+  ggtitle("F statistics from linear mixed effects models - sesame + combat") + 
+  scale_y_log10() # put y-axis on a log scale 
+graph
+```
+
+```{r}
+# Rewrote above code chunk, typo previously was pulling combat chamber number data instead of array (09282023)
+
+array_values_df = read_csv("array_values_df_combat_array.csv")
+array_values_df_melted = reshape2::melt(array_values_df,ids = cpg)
+library(ggplot2)
+graph <- ggplot(array_values_df_melted, aes(x = variable, y = value)) +
+  #geom_boxplot(notch = FALSE, outlier.shape = NA) + # hide outlier points
+  geom_boxplot(notch = FALSE,lwd=0.25,outlier.size=0.25,outlier.stroke = 0.25) + # don't hide outlier points
+  theme_bw() +
+  ggtitle("Fstats lme - sesame") + 
+  scale_y_log10() # put y-axis on a log scale 
+graph
+
+graph <- ggplot(array_values_df_melted, aes(x = variable, y = value)) +
+  #geom_boxplot(notch = FALSE, outlier.shape = NA) + # hide outlier points
+  geom_boxplot(notch = FALSE,lwd=0.25,outlier.size=0.25,outlier.stroke = 0.25) + # don't hide outlier points
+  theme_bw() +
+  theme(text = element_text(family = "Helvetica", size = 5),
+  axis.title = element_text(size = 5))+
+  ggtitle("Fstats lme - sesame") + 
+  scale_y_log10() # put y-axis on a log scale 
+graph
+
+
+
+### Plotting
+pdf_export_directory = '~/dnamstability/dnamstability-abutler/pdf_plots/' #where I'm saving figures
+pdf(file = paste0(pdf_export_directory, "lme_arrayVSchamber_sesameCombatArray_test.pdf"),   # The directory you want to save the file in
+    width = (30/25.4), # The width of the plot in inches (converted from mm)
+    height = 40/25.4) # The height of the plot in inches
+graph
+dev.off()
+###
+```
+
+# compiled plots
+```{r}
+# read array values
+array_values_raw = read_csv("array_values_df_raw.csv")
+array_values_raw = data.frame(array_values_raw)
+array_values_raw$pipeline = "raw"
+
+array_values_sesame = read_csv("array_values_df_sesame.csv")
+array_values_sesame = data.frame(array_values_sesame)
+array_values_sesame$pipeline = "sesame"
+
+
+array_values_combatBetas = read_csv("array_values_df_sesameCombatChamberNumber.csv")
+array_values_combatBetas = data.frame(array_values_combatBetas)
+array_values_combatBetas$pipeline = "combatBetas"
+
+
+array_values_combatArray = read_csv("array_values_df_combat_array.csv")
+array_values_combatArray = data.frame(array_values_combatArray)
+array_values_combatArray$pipeline = "combatArray"
+
+array_values_combined = rbind(array_values_raw,array_values_sesame)
+array_values_combined = rbind(array_values_combined,array_values_combatBetas)
+array_values_combined = rbind(array_values_combined,array_values_combatArray)
+
+array_values_combined_melted = reshape2::melt(array_values_combined)
+
+graph <- ggplot(array_values_combined_melted, aes(x = pipeline, y = value, colour = variable)) +
+  geom_boxplot(notch = FALSE) +
+  theme_bw() + 
+  coord_cartesian(ylim = c(0,100))
+graph
+
+ggplotgui::ggplot_shiny(array_values_combined_melted)
+```
+
+

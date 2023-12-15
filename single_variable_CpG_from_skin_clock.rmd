@@ -1,0 +1,707 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Exploration of a single variable CpG from the Skin clock to see what's going on with this CpG
+
+## cg03183882: A single CpG with high range and high coefficient in the skin clock
+
+check the probe type
+```{r}
+library(ggplot2)
+library(readr)
+library(dplyr)
+library(minfi)
+
+# check the probe type:
+infinium_methylationepic_v_1_0_b5_manifest_file <- read_csv("infinium-methylationepic-v-1-0-b5-manifest-file.csv",
+    skip = 7)
+
+cg03183882 = infinium_methylationepic_v_1_0_b5_manifest_file[infinium_methylationepic_v_1_0_b5_manifest_file$IlmnID=="cg03183882",] # it's a typeII probe
+```
+## load data
+```{r}
+# Load raw data
+df_normalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221020_dnamstability_normalizedBetas_raw_abutler.Rds")
+
+df_unnormalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221020_dnamstability_unnormalizedBetas_raw_abutler.Rds")
+
+SampleAnnotation = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221020_dnamstability_SampleAnnotation_for_ibishof.Rds")
+
+df_normalized$X205832330169_R03C01 = NULL
+df_unnormalized$X205832330169_R03C01 = NULL
+
+SampleAnnotation$row_number = substr(SampleAnnotation$ChIP_ID,16,16)
+
+SampleAnnotation = SampleAnnotation %>%
+  dplyr::select(ChIP_ID,subject,row_number,array,pooled)
+SampleAnnotation$XChIP_ID = paste0("X",SampleAnnotation$ChIP_ID)
+#SampleAnnotation$ChIP_ID=NULL
+
+# make rgSet extended
+idat_dir = file.path('/home/sagemaker-user/dnamstability/dnamstability-abutler/data/idat_files/')
+rgSet = read.metharray.exp(idat_dir, extended = TRUE)
+```
+
+
+```{r}
+# get low-level data for probes
+TypeI.Red <- getProbeInfo(rgSet, type = "I-Red")
+TypeI.Green <- getProbeInfo(rgSet, type = "I-Green")
+TypeII <- getProbeInfo(rgSet, type = "II")
+
+Grn = assay(rgSet, "Green")       # Green mean across beads
+Red = assay(rgSet, "Red")         # Red mean across beads
+GrnSD = assay(rgSet, "GreenSD")   # Green SD across beads
+RedSD = assay(rgSet, "RedSD")     # Red SD across beads
+nBeads = assay(rgSet, "NBeads")   # Number of Beads across probes
+
+df_RedSD = as.data.frame(RedSD)
+df_GrnSD = as.data.frame(GrnSD)
+df_Red = as.data.frame(Red)
+df_Green = as.data.frame(Grn)
+df_nBeads = as.data.frame(nBeads)
+
+typeII_red_stdev = df_RedSD %>%
+  filter((rownames(RedSD) %in% TypeII$AddressA))
+
+typeII_green_stdev = df_GrnSD %>%
+  filter((rownames(GrnSD) %in% TypeII$AddressA))
+
+typeII_red = df_Red %>%
+  filter((rownames(Red) %in% TypeII$AddressA))
+
+typeII_green = df_Green %>%
+  filter((rownames(Grn) %in% TypeII$AddressA))
+
+typeII_nBeads = df_nBeads %>%
+  filter((rownames(nBeads) %in% TypeII$AddressA))
+
+# add cpg name info
+TypeII_key = data.frame(Name = TypeII$Name,
+                        AddressA = TypeII$AddressA)
+
+typeII_red_stdev = merge(typeII_red_stdev,TypeII_key,by.x="row.names",by.y = "AddressA")
+typeII_green_stdev = merge(typeII_green_stdev,TypeII_key,by.x="row.names",by.y = "AddressA")
+typeII_red = merge(typeII_red,TypeII_key,by.x="row.names",by.y = "AddressA")
+typeII_green = merge(typeII_green,TypeII_key,by.x="row.names",by.y = "AddressA")
+typeII_nBeads = merge(typeII_nBeads,TypeII_key,by.x="row.names",by.y = "AddressA")
+```
+
+```{r}
+# filter for cg03183882
+cg03183882_red_stdev = typeII_red_stdev[typeII_red_stdev$Name=="cg03183882",]
+cg03183882_green_stdev = typeII_green_stdev[typeII_green_stdev$Name=="cg03183882",]
+cg03183882_red = typeII_red[typeII_red$Name=="cg03183882",]
+cg03183882_green = typeII_green[typeII_green$Name=="cg03183882",]
+cg03183882_nBeads = typeII_nBeads[typeII_nBeads$Name=="cg03183882",]
+
+
+# filter columns
+cg03183882_red_stdev = cg03183882_red_stdev[,colnames(cg03183882_red_stdev) %in% SampleAnnotation$ChIP_ID]
+cg03183882_red_stdev = reshape2::melt(cg03183882_red_stdev)
+cg03183882_red_stdev$feature = "red_stdev"
+cg03183882_green_stdev = cg03183882_green_stdev[,colnames(cg03183882_green_stdev) %in% SampleAnnotation$ChIP_ID]
+cg03183882_green_stdev = reshape2::melt(cg03183882_green_stdev)
+cg03183882_green_stdev$feature = "green_stdev"
+cg03183882_red = cg03183882_red[,colnames(cg03183882_red) %in% SampleAnnotation$ChIP_ID]
+cg03183882_red = reshape2::melt(cg03183882_red)
+cg03183882_red$feature = "red"
+
+cg03183882_green = cg03183882_green[,colnames(cg03183882_green) %in% SampleAnnotation$ChIP_ID]
+cg03183882_green = reshape2::melt(cg03183882_green)
+cg03183882_green$feature = "green"
+cg03183882_nBeads = cg03183882_nBeads[,colnames(cg03183882_nBeads) %in% SampleAnnotation$ChIP_ID]
+cg03183882_nBeads = reshape2::melt(cg03183882_nBeads)
+cg03183882_nBeads$feature = "nBeads"
+
+cg03183882_lowlevel = rbind(cg03183882_nBeads,
+                            cg03183882_red,
+                            cg03183882_green,
+                            cg03183882_red_stdev,
+                            cg03183882_green_stdev)
+cg03183882_lowlevel_cols = cbind(cg03183882_nBeads,
+                            cg03183882_red,
+                            cg03183882_green,
+                            cg03183882_red_stdev,
+                            cg03183882_green_stdev)
+
+
+
+
+cg03183882_lowlevel$subject = "E"
+for (i in 1:length(cg03183882_lowlevel$variable)){
+  j = which(SampleAnnotation$ChIP_ID == cg03183882_lowlevel$variable[i])
+  cg03183882_lowlevel$subject[i] = SampleAnnotation$subject[j]
+}
+
+cg03183882_lowlevel_fluorescence = cg03183882_lowlevel
+cg03183882_lowlevel_fluorescence = cg03183882_lowlevel_fluorescence[cg03183882_lowlevel_fluorescence$feature!="nBeads",]
+ggplotgui::ggplot_shiny(cg03183882_lowlevel_fluorescence)
+
+
+
+
+# The code below will generate graphs; however, screenshots of plotly plots were taken using ggplotgui
+graph_for_fig <- ggplot(cg03183882_lowlevel_fluorescence, aes(x = variable, y = value, colour = feature)) +
+  geom_point(size = 0.5, alpha = 0.5) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust = 1),text = element_text(family = "Helvetica", size = 6), legend.position = "none",
+    axis.title = element_text(size = 6)) + 
+  scale_color_manual(values = c("green","darkgreen","red","darkred"))+
+  ggtitle("cg03183882 - Raw")
+
+graph_for_fig
+
+graph1_withLegend <- ggplot(cg03183882_lowlevel_fluorescence, aes(x = variable, y = value, colour = feature)) +
+  geom_point() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust = 1),text = element_text(family = "Helvetica", size = 6), 
+    axis.title = element_text(size = 6)) + 
+  scale_color_manual(values = c("green","darkgreen","red","darkred"))+
+  ggtitle("cg03183882 - Raw")
+graph1_withLegend
+
+graph2 <- ggplot(cg03183882_nBeads, aes(x = variable, y = value)) +
+  geom_point() +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1)
+  )
+graph2
+
+outliers::grubbs.test(cg03183882_green_stdev$value)
+outliers::grubbs.test(cg03183882_red_stdev$value)
+outliers::grubbs.test(cg03183882_green$value)
+outliers::grubbs.test(cg03183882_red$value)
+
+```
+
+```{r}
+library(patchwork)
+fig7_c = graph_for_fig
+fig7_c_legend = graph1_withLegend
+
+
+
+```
+
+```{r}
+### Plotting
+pdf_export_directory = '~/dnamstability/dnamstability-abutler/pdf_plots/' #where I'm saving figures
+pdf(file = paste0(pdf_export_directory, "fig7c_legend.pdf"),   # The directory you want to save the file in
+    width = (180/25.4), # The width of the plot in inches (converted from mm)
+    height = (110/25.4)) # The height of the plot in inches
+fig7_c_legend
+dev.off()
+###
+
+
+```
+
+
+
+
+Let's repeat this using SeSAMe and ComBat adjusted FIs...actually let's not. This isn't bias, it's an outlier.
+```{r}
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Next step: 
+Both red/green stdev seem to be an outlier for that one high var subject A sample. Is it predictive of beta value range within-sample? Perhaps we could color clock CpGs by stdev in the above plots.
+
+# Removal of high signal/noise low level data
+
+## Load data and metadata
+```{r}
+# Load raw data
+df_normalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221020_dnamstability_normalizedBetas_raw_abutler.Rds")
+
+df_unnormalized = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221020_dnamstability_unnormalizedBetas_raw_abutler.Rds")
+
+SampleAnnotation = readRDS("/home/sagemaker-user/dnamstability/dnamstability-abutler/data/raw_data/20221020_dnamstability_SampleAnnotation_for_ibishof.Rds")
+
+infinium_methylationepic_v_1_0_b5_manifest_file <- read_csv("infinium-methylationepic-v-1-0-b5-manifest-file.csv",
+    skip = 7)
+
+df_normalized$X205832330169_R03C01 = NULL
+df_unnormalized$X205832330169_R03C01 = NULL
+
+SampleAnnotation$row_number = substr(SampleAnnotation$ChIP_ID,16,16)
+
+SampleAnnotation = SampleAnnotation %>%
+  dplyr::select(ChIP_ID,subject,row_number,array,pooled)
+SampleAnnotation$XChIP_ID = paste0("X",SampleAnnotation$ChIP_ID)
+SampleAnnotation$ChIP_ID=NULL
+
+idat_dir = file.path('/home/sagemaker-user/dnamstability/dnamstability-abutler/data/idat_files/')
+rgSet = read.metharray.exp(idat_dir, extended = TRUE)
+
+GrnSD = assay(rgSet, "GreenSD")   # Green SD across beads
+RedSD = assay(rgSet, "RedSD")     # Red SD across beads
+nBeads = assay(rgSet, "NBeads") 
+
+df_RedSD = as.data.frame(RedSD)
+df_GrnSD = as.data.frame(GrnSD)
+
+# although the main point is to flag high SD red and green channel CpGs, I am also going to flag low-n nBeads too
+df_nBeads = as.data.frame(nBeads)
+
+# drop outlier from low-level data
+# df_RedSD$`205832330169_R03C01` = NULL
+# df_GrnSD$`205832330169_R03C01` = NULL
+# df_nBeads$`205832330169_R03C01` = NULL
+
+# prune to only relevant addresses (type I and type II probes)
+infinium_methylationepic_v_1_0_b5_manifest_file = infinium_methylationepic_v_1_0_b5_manifest_file %>%
+  filter(Infinium_Design_Type=="I" | Infinium_Design_Type=="II")
+
+# convert addresses to integer
+infinium_methylationepic_v_1_0_b5_manifest_file$AddressA_ID = as.integer(infinium_methylationepic_v_1_0_b5_manifest_file$AddressA_ID
+)
+infinium_methylationepic_v_1_0_b5_manifest_file$AddressB_ID = as.integer(infinium_methylationepic_v_1_0_b5_manifest_file$AddressB_ID
+)
+```
+
+
+I'll use the modified z-score method from Iglewicz and Hoaglin to detect outliers (like the CpG shown above) in either red or green, and remove those from the dataset. I'll need to assess the effect this has on variability. Perhaps visually by comparing heatmaps, and then statistically using ICC or Sample-to-sample distances.
+
+Boris Iglewicz and David Hoaglin (1993), "Volume 16: How to Detect and Handle Outliers", The ASQC Basic References in Quality Control: Statistical Techniques, Edward F. Mykytka, Ph.D., Editor. (as per https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h.htm)
+
+## outlier check
+```{r}
+detect_outliers <- function(x) {
+  # Use the modified Z-score method to detect outliers
+  x = as.numeric(x)
+  # Calculate median
+  med <- median(x)
+  # Calculate MAD
+  mad <- median(abs(x - med))
+  # Calculate modified Z-score
+  mzscore <- 0.6745 * (x - med) / mad
+  # Return values outside of bounds
+  return(abs(mzscore) > 3.5)
+}
+
+detect_outliers <- function(x) {
+  # Return values outside of bounds
+  return(abs(0.6745 * (x - median(x)) / median(abs(x - median(x)))) > 7)
+}
+```
+
+
+```{r}
+# drop_these will eventually show "TRUE" if any cell has an outlier for the SD data in either channel (typeII) or either address (typeI)
+#infinium_methylationepic_v_1_0_b5_manifest_file = infinium_methylationepic_v_1_0_b5_manifest_file[1:100,]
+
+
+
+# define the outlier scan function, which will be used to apply detect_outliers() to each CpG
+# type_II_manifest_outlier_scan_function <- function(manifest_row) {
+#   temp_AddressA_ID <- manifest_row[3]
+#   temp_data_M_sd <- df_GrnSD[rownames(df_GrnSD) == temp_AddressA_ID,]
+#   temp_data_U_sd <- df_RedSD[rownames(df_RedSD) == temp_AddressA_ID,]
+#   test_M = detect_outliers(temp_data_M_sd[1,])
+#   test_U = detect_outliers(temp_data_U_sd[1,])
+#   return(as.logical(test_M | test_U))
+# }
+
+type_II_manifest_outlier_scan_function_green <- function(manifest_row) {
+  test_U = detect_outliers(as.numeric(df_GrnSD[rownames(df_GrnSD) == manifest_row[2],][1,]))
+  return(as.logical(test_U))
+}
+
+type_II_manifest_outlier_scan_function_red <- function(manifest_row) {
+  test_U = detect_outliers(as.numeric(df_RedSD[rownames(df_RedSD) == manifest_row[2],][1,]))
+  return(as.logical(test_U))
+}
+```
+
+```{r}
+# prune manifest and df_normalized to only type_II probes
+type_II_manifest = infinium_methylationepic_v_1_0_b5_manifest_file %>%
+  filter(Infinium_Design_Type == "II") %>% select(IlmnID,AddressA_ID)
+#troubleshooting
+#type_II_manifest = type_II_manifest[1:100,]
+```
+
+### (scrapped) based on other samples
+
+#### single core
+```{r}
+
+
+# library(tictoc)
+# tic()
+# type_II_to_drop_red = apply(type_II_manifest,1,type_II_manifest_outlier_scan_function_red)
+# type_II_to_drop_green = apply(type_II_manifest,1, type_II_manifest_outlier_scan_function_green)
+# 
+# type_II_to_drop_red = data.frame(t(type_II_to_drop_red))
+# type_II_to_drop_green = data.frame(t(type_II_to_drop_green))
+# type_II_to_drop = (type_II_to_drop_green | type_II_to_drop_red)
+# toc()
+# sum(type_II_to_drop,na.rm = TRUE)
+```
+
+#### parallel note that the above might work better typed in the console rather than run as part of a notebook ###
+
+```{r}
+# library(parallel)
+# library(tictoc)
+# type_II_manifest_t = data.frame(t(type_II_manifest))
+# tic()
+# # Define the number of cores to use
+# num_cores <- detectCores() - 3
+# # Apply the function in parallel using mclapply()
+# 
+# #type_II_to_drop <- mclapply(type_II_manifest_t, type_II_manifest_outlier_scan_function, mc.cores = num_cores-1)
+# type_II_to_drop_red <- mclapply(type_II_manifest_t, type_II_manifest_outlier_scan_function_red, mc.cores = num_cores)
+# type_II_to_drop_green <- mclapply(type_II_manifest_t, type_II_manifest_outlier_scan_function_green, mc.cores = num_cores)
+# 
+# 
+# 
+# # Convert the output to a matrix
+# #type_II_to_drop <- do.call(rbind, type_II_to_drop)
+# type_II_to_drop_red <- do.call(rbind, type_II_to_drop_red)
+# type_II_to_drop_green <- do.call(rbind, type_II_to_drop_green)
+# toc()
+# type_II_to_drop_red = data.frame(type_II_to_drop_red)
+# type_II_to_drop_green = data.frame(type_II_to_drop_green)
+# 
+# 
+# sum(type_II_to_drop_red,na.rm = TRUE)
+```
+
+```{r}
+# library(foreach)
+# library(doParallel)
+# type_II_manifest_t = data.frame(t(type_II_manifest))
+# num_cores <- detectCores() - 5
+# cl <- makeCluster(num_cores)
+# 
+# type_II_to_drop_red <- foreach(i = 1:length(type_II_manifest_t)) %dopar% {
+#   type_II_manifest_outlier_scan_function_red(type_II_manifest_t[[i]])
+# }
+# type_II_to_drop_green <- foreach(i = 1:length(type_II_manifest_t)) %dopar% {
+#   type_II_manifest_outlier_scan_function_green(type_II_manifest_t[[i]])
+# }
+# 
+# stopCluster(cl)
+```
+
+### based on low-level signal to noise
+```{r}
+grn_matrix = as.matrix(df_GrnSD)/as.matrix(df_Green)
+red_matrix = as.matrix(df_RedSD)/as.matrix(df_Red)
+
+df_grnSignalToNoise = data.frame(grn_matrix)
+df = reshape2::melt(df_grnSignalToNoise)
+df$green = reshape2::melt(df_Green)[,2]
+df$green_SD = reshape2::melt(df_GrnSD)[,2]
+colnames(df)[2] = "FI_stdev/FI"
+
+# histogram showing distribution of FI/FI_Stdev for green channel
+graph <- ggplot(df, aes(x = `FI_stdev/FI`)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.01) +
+  theme_bw() + 
+  ggtitle("Distribution of FI_Stdev/FI for green channel") 
+graph
+
+source("group_means_shiny.r")
+df = na.omit(df)
+#group_means_shiny(df)
+
+
+df_redSignalToNoise = data.frame(red_matrix)
+df = reshape2::melt(df_redSignalToNoise)
+df$red = reshape2::melt(df_Red)[,2]
+df$red_SD = reshape2::melt(df_RedSD)[,2]
+colnames(df)[2] = "FI_stdev/FI"
+
+# histogram showing distribution of FI/FI_Stdev for red channel
+graph <- ggplot(df, aes(x = `FI_stdev/FI`)) +
+  geom_histogram(position = 'identity', alpha = 0.8, binwidth = 0.01) +
+  theme_bw() + 
+  ggtitle("Distribution of FI_Stdev/FI for red channel")
+graph
+#ggplotgui::ggplot_shiny(df)
+
+source("group_means_shiny.r")
+df = na.omit(df)
+#group_means_shiny(df)
+
+df_grnSignalToNoise$address = rownames(df_grnSignalToNoise)
+df_redSignalToNoise$address = rownames(df_redSignalToNoise)
+
+# make a unique_ID to join columns from red and green df
+df_meltRed = reshape2::melt(df_redSignalToNoise,id.vars="address")
+df_meltRed$unique_ID = paste0(df_meltRed$address,df_meltRed$variable)
+
+df_meltgrn = reshape2::melt(df_grnSignalToNoise,id.vars="address")
+df_meltgrn$unique_ID = paste0(df_meltgrn$address,df_meltgrn$variable) # these are identical. Just going to join dfs
+
+df_melt = data.frame(address = df_meltRed$address,
+                     sample = df_meltRed$variable,
+                     `red_FI_stdev/FI` = df_meltRed$value,
+                     red_FI = reshape2::melt(df_Red)[,2],
+                     red_SD = reshape2::melt(df_RedSD)[,2],
+                     `green_FI_stdev/FI` = df_meltgrn$value,
+                     green_FI = reshape2::melt(df_Green)[,2],
+                     green_SD = reshape2::melt(df_GrnSD)[,2]
+                     )
+
+graph <- ggplot(df_melt, aes(x = green_FI, y = red_FI_stdev.FI)) +
+  geom_point() +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+#graph
+
+df_melt_na = na.omit(df_melt)
+
+#group_means_shiny(df_melt_na)
+
+sum(df_melt_na$red_FI_stdev.FI==df_melt_na$green_FI_stdev.FI)
+```
+
+
+
+Set a cutoff
+```{r}
+# cutoff = X
+cutoff = 0.5 # any probe who's CV is >0.3 gets converted to NA below
+
+grn_matrix = data.frame((as.matrix(df_GrnSD)/as.matrix(df_Green)) > cutoff)
+grn_matrix$rownames = rownames(grn_matrix)
+
+red_matrix = data.frame((as.matrix(df_RedSD)/as.matrix(df_Red)) > cutoff)
+red_matrix$rownames = rownames(red_matrix)
+
+#type_II_names = infinium_methylationepic_v_1_0_b5_manifest_file$Name[infinium_methylationepic_v_1_0_b5_manifest_file$Infinium_Design_Type=="II"]
+
+type_II_names = infinium_methylationepic_v_1_0_b5_manifest_file %>%
+  filter(Infinium_Design_Type=="II")
+
+type_I_red_names = infinium_methylationepic_v_1_0_b5_manifest_file %>%
+  filter(Infinium_Design_Type=="I" & infinium_methylationepic_v_1_0_b5_manifest_file$Color_Channel=="Red")
+
+type_I_green_names = infinium_methylationepic_v_1_0_b5_manifest_file %>%
+  filter(Infinium_Design_Type=="I" & infinium_methylationepic_v_1_0_b5_manifest_file$Color_Channel=="Grn")
+
+# lists of cpgs
+red_matrix_type_II = red_matrix %>%
+  filter(rownames %in% type_II_names$AddressA_ID)
+grn_matrix_type_II = grn_matrix %>%
+  filter(rownames %in% type_II_names$AddressA_ID)
+
+red_matrix_type_I = red_matrix %>%
+  filter(rownames %in% type_I_red_names$AddressA_ID | rownames %in% type_I_red_names$AddressB_ID)
+
+grn_matrix_type_I = grn_matrix %>%
+  filter(rownames %in% type_I_green_names$AddressA_ID | rownames %in% type_I_green_names$AddressB_ID)
+
+```
+
+```{r}
+to_drop = c()
+for (i in 1:length(type_II_names$Name)){
+  if (x == 2){}
+}
+```
+
+
+
+```{r}
+# prune manifest and df_normalized to only type_I probes
+type_I_red_manifest = infinium_methylationepic_v_1_0_b5_manifest_file %>%
+  filter(Infinium_Design_Type == "I" & Color_Channel=="Red")
+
+type_I_red_manifest_t = data.frame(t(type_I_red_manifest))
+
+type_I_red_manifest_outlier_scan_function <- function(manifest_row) {
+  temp_AddressA_ID <- manifest_row[3]
+  temp_AddressB_ID <- manifest_row[5]
+  temp_data_M_sd = df_RedSD[rownames(df_RedSD)==temp_AddressB_ID,]
+  temp_data_U_sd = df_RedSD[rownames(df_RedSD)==temp_AddressA_ID,]
+  test_M = detect_outliers(temp_data_M_sd[1,])
+  test_U = detect_outliers(temp_data_U_sd[1,])
+  return(as.logical(test_M | test_U))
+}
+
+type_I_red_to_drop <- mclapply(type_I_red_manifest_t, type_I_red_manifest_outlier_scan_function, mc.cores = num_cores)
+type_I_red_to_drop <- do.call(rbind, type_I_red_to_drop)
+type_I_red_to_drop = data.frame(type_I_red_to_drop)
+```
+
+```{r}
+# prune manifest and df_normalized to only type_I probes
+type_I_green_manifest = infinium_methylationepic_v_1_0_b5_manifest_file %>%
+  filter(Infinium_Design_Type == "I" & Color_Channel=="Grn")
+
+type_I_green_manifest_t = data.frame(t(type_I_green_manifest))
+
+type_I_green_manifest_outlier_scan_function <- function(manifest_row) {
+  temp_AddressA_ID <- manifest_row[3]
+  temp_AddressB_ID <- manifest_row[5]
+  temp_data_M_sd = df_GrnSD[rownames(df_GrnSD)==temp_AddressB_ID,]
+  temp_data_U_sd = df_GrnSD[rownames(df_GrnSD)==temp_AddressA_ID,]
+  test_M = detect_outliers(temp_data_M_sd[1,])
+  test_U = detect_outliers(temp_data_U_sd[1,])
+  return(as.logical(test_M | test_U))
+}
+
+type_I_green_to_drop <- mclapply(type_I_green_manifest_t, type_I_green_manifest_outlier_scan_function, mc.cores = num_cores-1)
+type_I_green_to_drop <- do.call(rbind, type_I_green_to_drop)
+type_I_green_to_drop = data.frame(type_I_green_to_drop)
+```
+
+```{r}
+to_drop = rbind(type_II_to_drop, type_I_red_to_drop, type_I_green_to_drop)
+rownames(to_drop) = c(type_II_manifest$IlmnID,type_I_red_manifest$IlmnID,type_I_green_manifest$IlmnID)
+```
+
+
+
+
+## scrap code below
+
+```{r}
+
+type_II_to_scan = df_normalized %>%
+  filter(rownames(df_normalized) %in% type_II_manifest$IlmnID)
+
+drop_these_type_II = drop_these %>%
+  filter(rownames(drop_these) %in% type_II_manifest$IlmnID)
+
+
+
+
+
+# drop_these should have the same dimensions as df_normalized here, and we'll truncate it down to specific subsets before rejoining
+drop_these = matrix(nrow=nrow(df_normalized),
+                    ncol = ncol(df_normalized))
+drop_these = data.frame(drop_these)
+colnames(drop_these) = colnames(df_normalized)
+rownames(drop_these) = rownames(df_normalized)
+#initialize df, will eventually be logical
+
+
+
+
+
+# sort to match the rows
+sort_to_match_rows = function(df_to_sort,template_df){
+  idx = match(rownames(df_to_sort),rownames(template_df)) # rows
+  df_to_sort = df_to_sort[order(idx),]
+  return(df_to_sort)
+}
+
+type_II_manifest = as.data.frame(type_II_manifest) # a tibble, convert to df
+
+rownames(type_II_manifest) = type_II_manifest$IlmnID # give it row names corresponding to IlmnID (cgXXX)
+
+
+type_II_manifest = sort_to_match_rows(type_II_manifest,drop_these_type_II) # sort
+sum(rownames(type_II_manifest)==rownames(drop_these_type_II)) # Check rownames the same:
+sum(rownames(type_II_manifest)==rownames(type_II_to_scan)) # Check rownames the same:
+
+number_of_observations = length(type_II_to_scan) # count number of observations
+type_II_to_scan$AddressA_ID = type_II_manifest$AddressA_ID # add the address
+
+type_II_outlier_scan_function <- function(vector,rowname) {
+  temp_AddressA_ID <- vector[number_of_observations + 1]
+  temp_data_M_sd <- df_GrnSD[rownames(df_GrnSD) == temp_AddressA_ID,]
+  temp_data_U_sd <- df_RedSD[rownames(df_RedSD) == temp_AddressA_ID,]
+  test_M = detect_outliers(temp_data_M_sd[1,])
+  test_U = detect_outliers(temp_data_U_sd[1,])
+  return(as.logical(test_M | test_U))
+}
+
+
+drop_these_type_II = data.frame(drop_these_type_II)
+for (i in 1:length(type_II_to_scan$X205832330169_R01C01)){
+  drop_these_type_II[i,] = type_II_outlier_scan_function(type_II_to_scan[i,],rownames(type_II_to_scan[i,]))
+}
+
+drop_these_type_II <- apply(type_II_to_scan, 1, function(x) type_II_outlier_scan_function(x, rownames(x)))
+
+
+
+```
+
+```{r}
+for(i in 1:length(rownames(drop_these))){
+  
+  if (temp_meta$Infinium_Design_Type[1] == "II"){
+    temp_data_M_sd = df_GrnSD[rownames(df_GrnSD)==temp_meta$AddressA_ID,]
+    temp_data_U_sd = df_RedSD[rownames(df_GrnSD)==temp_meta$AddressA_ID,]
+    test_M = detect_outliers(temp_data_M_sd[1,])
+    test_U = detect_outliers(temp_data_U_sd[1,])
+    drop_these[i,] = test_M | test_U
+  }
+}
+
+
+for(i in 1:length(rownames(drop_these))){
+  temp_meta = infinium_methylationepic_v_1_0_b5_manifest_file[infinium_methylationepic_v_1_0_b5_manifest_file$IlmnID == cpgs[i],]
+  if (temp_meta$Infinium_Design_Type[1] == "II"){
+    temp_data_M_sd = df_GrnSD[rownames(df_GrnSD)==temp_meta$AddressA_ID,]
+    temp_data_U_sd = df_RedSD[rownames(df_GrnSD)==temp_meta$AddressA_ID,]
+    test_M = detect_outliers(temp_data_M_sd[1,])
+    test_U = detect_outliers(temp_data_U_sd[1,])
+    drop_these[i,] = test_M | test_U
+  }
+}
+
+for(i in 1:length(rownames(drop_these))){
+  #Type I probes have two probes or addresses (A and B) corresponding to unmethylated and methylated probes, respectively (UMtools documentation)
+  if (temp_meta$Infinium_Design_Type[1] == "I" & temp_meta$Color_Channel=="Red"){
+    temp_data_M_sd = df_RedSD[rownames(df_RedSD)==temp_meta$AddressB_ID,]
+    temp_data_U_sd = df_RedSD[rownames(df_RedSD)==temp_meta$AddressA_ID,]
+    test_M = detect_outliers(temp_data_M_sd[1,])
+    test_U = detect_outliers(temp_data_U_sd[1,])
+    drop_these[i,] = test_M | test_U
+  }
+}
+
+for(i in 1:length(rownames(drop_these))){
+    if (temp_meta$Infinium_Design_Type[1] == "I" & temp_meta$Color_Channel=="Grn"){
+    temp_data_M_sd = df_GrnSD[rownames(df_GrnSD)==temp_meta$AddressB_ID,]
+    temp_data_U_sd = df_GrnSD[rownames(df_GrnSD)==temp_meta$AddressA_ID,]
+    test_M = detect_outliers(temp_data_M_sd[1,])
+    test_U = detect_outliers(temp_data_U_sd[1,])
+    drop_these[i,] = test_M | test_U
+  }
+}
+
+
+```
